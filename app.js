@@ -279,12 +279,33 @@
     $("currentWeather").textContent = fmt(c.temperature, 0) + "° · " + weatherIcon(c.code, c.isDay);
     $("currentWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа · " + weatherCodeText(c.code);
     $("depthSummary").textContent = l.depthLabel; $("depthMeta").textContent = l.depthSource + " · " + l.depthConfidence.toLowerCase();
-    renderMapMeta(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
+    renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
     $("fishSelect").value = settings.fish;
   }
 
+  function depthText(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) + " м" : "—";
+  }
   function renderMapMeta() {
-    const l = lake(); const center = l.center; $("mapHint").textContent = viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб"; $("mapScale").textContent = l.area + " · максимум " + l.maxDepth + " м"; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
+    const l = lake(); const center = l.center; $("mapHint").textContent = viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб"; $("mapScale").textContent = l.area + " · " + l.depthLabel; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
+  }
+  function renderDepthScale() {
+    const l = lake(); const levels = Array.isArray(l.contourLevels) ? l.contourLevels : [];
+    const chips = $("depthScaleChips"); const note = $("depthScaleNote"); const confidence = $("depthConfidenceChip");
+    if (!chips || !note || !confidence) return;
+    chips.innerHTML = levels.map((level, index) => `<span class="depth-scale-chip ${index === levels.length - 1 ? "is-deep" : ""}">${escapeHtml(depthText(level))}</span>`).join("");
+    confidence.textContent = "уверенность: " + String(l.depthConfidence || "неизвестна").toLowerCase();
+    note.textContent = (l.depthNote || "Глубины — ориентир, проверьте эхолотом.") + " Контуры — визуальная интерполяция.";
+  }
+  function renderDepthAudit() {
+    const target = $("depthAuditList"); if (!target) return;
+    target.innerHTML = lakeKeys.map((key) => {
+      const l = lakes[key]; const evidence = Array.isArray(l.depthEvidence) ? l.depthEvidence : [];
+      const statusClass = String(l.depthConfidence || "").toLowerCase().includes("средняя") ? "is-medium" : "";
+      const rows = evidence.map((item) => `<div class="depth-evidence-row ${item.excluded ? "is-excluded" : ""}"><strong>${escapeHtml(item.source || "Источник")}</strong><span class="depth-evidence-value">${escapeHtml(item.value || "—")}</span><small>${escapeHtml(item.type || "")} · ${escapeHtml(item.note || "")}</small><a href="${escapeHtml(item.href || "#")}" target="_blank" rel="noreferrer" aria-label="Открыть источник: ${escapeHtml(item.source || "")}">↗</a></div>`).join("");
+      return `<article class="depth-audit-card"><div class="depth-audit-card-head"><div><strong>${escapeHtml(l.name)}</strong><div class="depth-audit-claim">${escapeHtml(l.depthLabel)}</div></div><span class="depth-audit-status ${statusClass}">${escapeHtml(l.depthConfidence || "нет оценки")}</span></div><div class="depth-audit-evidence">${rows || "<small>Нет опубликованного числового подтверждения.</small>"}</div><p class="depth-audit-note">${escapeHtml(l.depthNote || "Глубина ориентировочная; проверьте промером.")}</p></article>`;
+    }).join("");
   }
   function renderBestWindow() {
     const windows = bestWindows(3); const first = windows[0];
@@ -482,7 +503,7 @@
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; constrainMapPan(w, h); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
     drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34)); drawLand(ctx,w,h,bounds);
     ctx.save(); if (viewMode === "3d") applyTerrainTransform(ctx,w,h); const cx=w/2,cy=h/2; ctx.translate(cx + mapState.panX, cy + mapState.panY); ctx.scale(mapState.scale, mapState.scale); ctx.translate(-cx,-cy);
-    if (viewMode === "3d") { drawTerrainShadow(ctx,base,w,h); drawTerrainGrid(ctx,w,h,base); } drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base,viewMode === "3d"); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); ctx.restore(); updateZoomUi();
+    if (viewMode === "3d") { drawTerrainShadow(ctx,base,w,h); drawTerrainGrid(ctx,w,h,base); } drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base,viewMode === "3d",w,h); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); if (depthVisible) drawDepthLabels(ctx,base,viewMode === "3d",w,h); ctx.restore(); updateZoomUi();
   }
   function drawMapBackground(ctx,w,h) { const g = ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,"#12353a"); g.addColorStop(1,"#071d23"); ctx.fillStyle=g;ctx.fillRect(0,0,w,h); ctx.strokeStyle="rgba(159,231,199,.07)";ctx.lineWidth=1; const step=Math.max(40,w/14); for(let x=0;x<w;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();} for(let y=0;y<h;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();} }
   function drawLand(ctx,w,h,bounds) { ctx.fillStyle="rgba(31,69,56,.45)"; ctx.fillRect(0,0,w,h); ctx.fillStyle="rgba(83,125,89,.12)"; for(let i=0;i<18;i++){const x=(i*173)%w,y=(i*97)%h;ctx.beginPath();ctx.arc(x,y,7+(i%4)*3,0,Math.PI*2);ctx.fill();} }
@@ -491,7 +512,41 @@
   function terrainInverseY(y,h) { const tilt = .64; const offset = Math.min(64, Math.max(34, h * .14)); return h / 2 + (y - h / 2 - offset) / tilt; }
   function drawTerrainShadow(ctx,points,w,h) { ctx.save(); ctx.globalAlpha = .28; for (let i = 8; i >= 1; i--) { pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + i * 4 }))); ctx.fillStyle = `rgba(0,10,15,${.035 + i * .012})`; ctx.fill(); } ctx.globalAlpha = .5; pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + 34 }))); ctx.strokeStyle = "rgba(1,13,18,.65)"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
   function drawWater(ctx,points,tilted) { pathPolygon(ctx,points); const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height); g.addColorStop(0, tilted ? "rgba(136,211,220,.78)" : "rgba(72,153,171,.62)");g.addColorStop(.42, tilted ? "rgba(49,128,151,.78)" : "rgba(39,116,139,.67)");g.addColorStop(1,"rgba(12,54,76,.88)");ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=tilted ? "rgba(203,249,232,.92)" : "rgba(159,231,199,.78)";ctx.lineWidth=tilted ? 2.4 : 2;ctx.stroke(); if(tilted){ctx.save();ctx.globalAlpha=.32;pathPolygon(ctx,points.map((p)=>({x:p.x,y:p.y-2})));ctx.strokeStyle="#e3fff4";ctx.lineWidth=1;ctx.stroke();ctx.restore();} }
-  function drawDepthBands(ctx,points,tilted=false) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const center=points.reduce((a,p)=>({x:a.x+p.x/points.length,y:a.y+p.y/points.length}),{x:0,y:0}); const max=Math.max(...lake().contourLevels); lake().contourLevels.slice().reverse().forEach((level,i)=>{const f=.18 + .68*(level/max); const ring=points.map((p)=>({x:center.x+(p.x-center.x)*f,y:center.y+(p.y-center.y)*f})); pathPolygon(ctx,ring);const alpha=tilted ? .105+i*.018 : .06+i*.012;ctx.fillStyle=`rgba(${28+i*8},${95+i*12},${130+i*10},${alpha})`;ctx.fill();ctx.strokeStyle=`rgba(185,242,224,${tilted ? .18+i*.025 : .10+i*.012})`;ctx.lineWidth=tilted ? 1.2 : 1;ctx.stroke(); }); ctx.save();ctx.font=Math.max(10,w/105).toFixed(0)+"px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.78)";ctx.textAlign="center"; lake().contourLevels.forEach((level,i)=>{const a=-.8+i/(lake().contourLevels.length-1)*2.1; const rx=center.x+Math.cos(a)*Math.min(w*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.x-center.x)),0))*(.32+i*.07); const ry=center.y+Math.sin(a)*Math.min(h*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.y-center.y)),0))*(.32+i*.07);ctx.fillText(level+" м",rx,ry);});ctx.restore(); }
+  function depthCenter(points) { return points.reduce((a,p) => ({ x: a.x + p.x / points.length, y: a.y + p.y / points.length }), { x: 0, y: 0 }); }
+  function drawDepthBands(ctx, points, tilted = false, width, height) {
+    if (!Array.isArray(points) || points.length < 3) return;
+    const levels = (lake().contourLevels || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!levels.length) return;
+    const center = depthCenter(points); const max = Math.max(...levels, 1);
+    levels.slice().reverse().forEach((level, index) => {
+      const t = clamp(level / max, 0, 1); const f = clamp(.16 + .74 * t, .16, .94);
+      const ring = points.map((p) => ({ x: center.x + (p.x - center.x) * f, y: center.y + (p.y - center.y) * f }));
+      pathPolygon(ctx, ring);
+      const alpha = (tilted ? .12 : .075) + t * (tilted ? .11 : .075);
+      ctx.fillStyle = `rgba(${Math.round(54 - t * 27)},${Math.round(137 - t * 43)},${Math.round(159 + t * 20)},${alpha.toFixed(3)})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(210,250,235,${((tilted ? .24 : .16) + t * .2).toFixed(3)})`;
+      ctx.lineWidth = tilted ? 1.35 : 1.1; ctx.stroke();
+    });
+  }
+  function roundedRectPath(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + width - r, y); ctx.quadraticCurveTo(x + width, y, x + width, y + r); ctx.lineTo(x + width, y + height - r); ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height); ctx.lineTo(x + r, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+  function drawDepthLabels(ctx, points, tilted = false, width, height) {
+    if (!Array.isArray(points) || points.length < 3) return;
+    const levels = (lake().contourLevels || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b); if (!levels.length) return;
+    const center = depthCenter(points); const max = Math.max(...levels, 1);
+    const radiusX = Math.max(...points.map((p) => Math.abs(p.x - center.x)), 1); const radiusY = Math.max(...points.map((p) => Math.abs(p.y - center.y)), 1);
+    const angles = [-.92, .06, 1.02, 2.02, 2.92, -.2, .62, 2.48];
+    const fontSize = clamp((width || 360) / 62, 11, 15); const safeTop = tilted ? 24 : 16; const safeBottom = tilted ? (height || 280) - 26 : (height || 280) - 16;
+    ctx.save(); ctx.font = `600 ${fontSize.toFixed(1)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    levels.forEach((level, index) => {
+      const t = clamp(level / max, 0, 1); const angle = angles[index % angles.length]; const x0 = center.x + Math.cos(angle) * radiusX * (.3 + t * .48); const y0 = center.y + Math.sin(angle) * radiusY * (.3 + t * .48); const label = depthText(level); const textWidth = ctx.measureText(label).width; const boxWidth = textWidth + 12; const boxHeight = fontSize + 9;
+      const x = clamp(x0, boxWidth / 2 + 5, (width || 360) - boxWidth / 2 - 5); const y = clamp(y0, safeTop + boxHeight / 2, safeBottom - boxHeight / 2);
+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = 5; ctx.shadowOffsetY = 1; roundedRectPath(ctx, x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 5); ctx.fillStyle = "rgba(3,18,23,.84)"; ctx.fill(); ctx.shadowColor = "transparent"; ctx.strokeStyle = index === levels.length - 1 ? "rgba(159,231,199,.9)" : "rgba(220,250,237,.6)"; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = "#effff7"; ctx.fillText(label, x, y + .5); ctx.restore();
+    });
+    ctx.restore();
+  }
   function drawTerrainGrid(ctx,w,h,points) { ctx.save();ctx.globalAlpha=.32;ctx.strokeStyle="#d0f5e9";ctx.lineWidth=1;const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y)); for(let i=0;i<9;i++){const y=minY+(maxY-minY)*i/8;ctx.beginPath();ctx.moveTo(minX-20,y);ctx.lineTo(maxX+20,y-42-i*2);ctx.stroke();} for(let i=0;i<11;i++){const x=minX+(maxX-minX)*i/10;ctx.beginPath();ctx.moveTo(x,minY-8);ctx.lineTo(x-42,maxY+8);ctx.stroke();} ctx.globalAlpha=.24; ctx.strokeStyle="#0a3245"; for(let i=0;i<5;i++){const y=minY+(maxY-minY)*(.14+i*.18);ctx.beginPath();ctx.moveTo(minX,y);ctx.quadraticCurveTo((minX+maxX)/2,y-18,maxX,y-34);ctx.stroke();}ctx.restore(); }
   function drawRiver(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const path=window.BURNAYA_PATH.map((p)=>projectPoint(p[0],p[1],w,h,bounds,34)); ctx.save();ctx.strokeStyle="#f3d889";ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([7,5]);ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#f3d889";ctx.font="11px -apple-system, sans-serif";const mid=path[Math.floor(path.length/2)];ctx.fillText("р. Бурная · проверьте правила",mid.x+8,mid.y-8);ctx.restore(); }
   function drawHotspots(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; ctx.save(); lake().hotspots.forEach((spot,i)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34);const r=Math.max(16,w/48);const score=scoreAt(new Date(),settings.fish,spot);ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fillStyle="rgba(243,216,137,.15)";ctx.fill();ctx.strokeStyle="rgba(243,216,137,.65)";ctx.setLineDash([3,3]);ctx.lineWidth=1.3;ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fillStyle="#f3d889";ctx.fill(); if(i===0 || w>650){ctx.font="11px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.9)";ctx.textAlign="left";ctx.fillText(spot.name+" · "+score,p.x+r+4,p.y+4);}});ctx.restore(); }
@@ -539,7 +594,7 @@
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
   function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude};drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(()=>{});} }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260831-depth-audit-1", { updateViaCache: "none" }).catch(()=>{});} }
   function boot() { setupNavigation(); $("fishSelect").value=settings.fish; navigate(location.hash.slice(1)||"map",false); setConnection(isOnline()?"online":"offline",isOnline()?"онлайн":"локально"); renderSources(); renderAll(); fetchWeather(false); registerServiceWorker(); }
   document.addEventListener("DOMContentLoaded", boot);
 })();

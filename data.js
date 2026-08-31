@@ -12,10 +12,14 @@ window.LAKE_DATA = {
     center: [60.60979227656426, 30.235289968550205],
     area: "≈ 0,063 км²",
     maxDepth: 15.4,
-    depthLabel: "ориентир до ≈15 м",
-    depthSource: "схема глубин FishingPiter",
+    depthLabel: "ориентир до ≈15,4 м",
+    depthSource: "FishingPiter · схема 64 (скан)",
     depthConfidence: "Низкая / средняя",
     contourLevels: [1.5, 3, 5, 8, 12, 15.4],
+    depthNote: "На исходном скане карты 64 видна отметка 15,4 м. Это опубликованная схема, а не сплошная эхолотная съёмка; контуры в приложении интерполированы.",
+    depthEvidence: [
+      { source: "FishingPiter · карта 64", type: "скан схемы", value: "15,4 м", note: "Отметка присутствует на исходном изображении; в текстовом описании абсолютный максимум не приведён.", href: "https://fishingpiter.ru/maps/64.htm" }
+    ],
     fish: ["щука", "окунь", "плотва"],
     fishKinds: ["pike", "perch", "roach", "burbot", "ruff"],
     waterNote: "Небольшое лесное озеро; опубликованная схема отмечает глубокую чашу и мелководный залив у ручья.",
@@ -37,11 +41,17 @@ window.LAKE_DATA = {
     aliases: "Rautjärvi",
     center: [60.59290325899254, 30.208761245012283],
     area: "≈ 1,32 км²",
-    maxDepth: 6.0,
-    depthLabel: "модельный максимум ≈6 м",
-    depthSource: "GLOBathy + описание FishingPiter",
+    maxDepth: 11.6,
+    depthLabel: "ориентир до ≈11,6 м",
+    depthSource: "FishingPiter · схема 172 (8,4 и 11,6 м)",
     depthConfidence: "Низкая",
-    contourLevels: [1, 2, 3, 4, 5, 6],
+    contourLevels: [1, 2, 3, 5, 8.4, 11.6],
+    depthNote: "На исходном скане карты 172 читаются отметки 8,4 и 11,6 м. 11,6 м — верхний ориентир по этой схеме, но независимого современного промера в открытом источнике не найдено.",
+    depthEvidence: [
+      { source: "FishingPiter · карта 172", type: "скан схемы", value: "8,4 и 11,6 м", note: "Обе отметки видны на исходном изображении; точный статус максимума схемой не пояснён.", href: "https://fishingpiter.ru/maps/172.htm" },
+      { source: "FishingPiter · описание", type: "текстовый ориентир", value: "2–3 м", note: "Для зимнего окуня описана глубина 2–3 м у берега; это не максимум озера.", href: "https://fishingpiter.ru/maps/172.htm" },
+      { source: "GLOBathy · Figshare", type: "глобальная модель", value: "≈6 м · не подтверждено", note: "Кандидат из набора нельзя однозначно связать с этим водоёмом; в карту как максимум не подставлен.", href: "https://doi.org/10.6084/m9.figshare.13402070", excluded: true }
+    ],
     fish: ["окунь", "лещ", "щука", "плотва", "налим"],
     fishKinds: ["perch", "bream", "pike", "roach", "burbot", "ruff"],
     waterNote: "Длинное проточное озеро: протока из Раздолинского озера и выход ручья в Волчью.",
@@ -64,10 +74,16 @@ window.LAKE_DATA = {
     center: [60.64348188126569, 30.24910351972434],
     area: "≈ 42,2 км² по OSM",
     maxDepth: 24,
-    depthLabel: "опубликованный максимум 24 м",
-    depthSource: "Википедия + схема FishingPiter",
+    depthLabel: "ориентир 23–24 м",
+    depthSource: "Википедия (24 м) · Fishermap (23 м)",
     depthConfidence: "Средняя",
     contourLevels: [2, 4, 7, 10, 14, 18, 24],
+    depthNote: "Для максимума есть небольшое расхождение: 24 м в справочнике и 23 м в батиметрической карточке. Схема FishingPiter подтверждает рабочие 6–8 м с берега, но не даёт отдельного числа максимума в тексте.",
+    depthEvidence: [
+      { source: "Википедия · Суходольское озеро", type: "справочник", value: "24 м", note: "В статье прямо указана максимальная глубина 24 м.", href: "https://ru.wikipedia.org/wiki/Суходольское_озеро" },
+      { source: "Fishermap / GPS Nautical Charts", type: "батиметрическая карточка", value: "23 м", note: "В карточке водоёма указана глубина 23 м; методика и дата промеров не раскрыты полностью.", href: "https://ru.fishermap.org/depth-map/suhodolyskoe-ozero/" },
+      { source: "FishingPiter · карта 147", type: "рыболовная схема", value: "6–8 м с берега", note: "Текст описывает глубины, доступные с берега; это не утверждение о максимуме.", href: "https://fishingpiter.ru/maps/147.htm" }
+    ],
     fish: ["лещ", "щука", "окунь", "плотва"],
     fishKinds: ["bream", "pike", "perch", "roach", "burbot", "zander"],
     waterNote: "Большое проточное озеро системы Вуоксы; в самой Бурной действуют отдельные правила и ограничения.",
@@ -163,10 +179,11 @@ window.FISH_GUIDE = {
 
 window.APP_SOURCES = [
   { label: "Контуры береговой линии", text: "OpenStreetMap / ODbL", href: "https://www.openstreetmap.org/copyright" },
-  { label: "Кривое · схема глубин", text: "FishingPiter · карта 64", href: "https://fishingpiter.ru/maps/64.htm" },
-  { label: "Уловное · схема глубин", text: "FishingPiter · карта 172", href: "https://fishingpiter.ru/maps/172.htm" },
-  { label: "Суходольское · схема глубин", text: "FishingPiter · карта 147", href: "https://fishingpiter.ru/maps/147.htm" },
-  { label: "Модель глубин Уловного", text: "GLOBathy (Figshare), вспомогательная оценка", href: "https://doi.org/10.6084/m9.figshare.13402070" },
+  { label: "Кривое · схема глубин", text: "FishingPiter · карта 64 · отметка 15,4 м на скане", href: "https://fishingpiter.ru/maps/64.htm" },
+  { label: "Уловное · схема глубин", text: "FishingPiter · карта 172 · отметки 8,4 и 11,6 м", href: "https://fishingpiter.ru/maps/172.htm" },
+  { label: "Суходольское · схема глубин", text: "FishingPiter · карта 147 · береговые ориентиры 6–8 м", href: "https://fishingpiter.ru/maps/147.htm" },
+  { label: "Суходольское · независимая сверка", text: "Википедия 24 м · Fishermap 23 м", href: "https://ru.fishermap.org/depth-map/suhodolyskoe-ozero/" },
+  { label: "GLOBathy · контроль модели", text: "Figshare · кандидат ≈6 м для Уловного не использован как подтверждение", href: "https://doi.org/10.6084/m9.figshare.13402070" },
   { label: "Погода и почасовой прогноз", text: "Open‑Meteo, CC BY 4.0", href: "https://open-meteo.com/" },
   { label: "Суходольское и Бурная", text: "Википедия / OSM; правила рыболовства нужно проверить на месте", href: "https://ru.wikipedia.org/wiki/Суходольское_озеро" }
 ];

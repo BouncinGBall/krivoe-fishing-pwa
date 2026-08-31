@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260831-depth-audit-1">
   <title>Клёв рядом · Карта озёр</title>
 </head>
 <body>
@@ -75,6 +75,11 @@
               <button id="zoomIn" type="button" aria-label="Увеличить масштаб">＋</button>
             </div>
             <div id="mapToast" class="map-toast" hidden></div>
+          </div>
+          <div class="depth-strip" aria-live="polite" aria-label="Шкала глубин выбранного водоёма">
+            <div class="depth-strip-head"><span><i class="depth-strip-mark"></i>Разметка глубин</span><span id="depthConfidenceChip" class="confidence-chip">уверенность —</span></div>
+            <div id="depthScaleChips" class="depth-scale-chips"></div>
+            <p id="depthScaleNote">Проверяю опубликованную схему…</p>
           </div>
           <div class="map-footer">
             <div class="map-footer-main"><div class="legend"><span><i class="legend-deep"></i>глубже</span><span><i class="legend-shallow"></i>мельче</span><span><i class="legend-zone"></i>перспективная зона</span></div><small class="map-attribution">Контуры: © OpenStreetMap contributors</small></div>
@@ -152,6 +157,11 @@
       <section id="screen-about" class="screen" data-screen="about" aria-labelledby="aboutHeading" hidden>
         <div class="section-heading page-heading"><div><p class="eyebrow">ПРОЗРАЧНО И ЧЕСТНО</p><h2 id="aboutHeading">Данные и правила</h2><p class="section-lead">Что карта знает, а где лучше включить эхолот.</p></div></div>
         <div class="truth-card"><span class="truth-mark">!</span><div><strong>Глубины — ориентир, не навигация</strong><p>ICESat‑2 не выдаёт готовую сплошную карту дна под этими озёрами. Здесь соединены контур береговой линии, опубликованные схемы и модель рельефа. Ваши промеры важнее любой красивой заливки. «LIVE» означает текущую погоду и пересчёт модели — потока реальных уловов в приложении нет.</p></div></div>
+        <section class="depth-audit-section" aria-labelledby="depthAuditHeading">
+          <div class="section-heading"><div><p class="eyebrow">ПРОВЕРКА ГЛУБИН</p><h3 id="depthAuditHeading">Что подтверждено источниками</h3></div><span class="muted-label">обновлено 31.08.2026</span></div>
+          <div id="depthAuditList" class="depth-audit-list"></div>
+          <p class="depth-audit-footnote">Скановые схемы и справочники помогают найти рельеф, но не заменяют эхолот. Числа с пометкой «ориентир» не предназначены для навигации.</p>
+        </section>
         <div class="rule-list">
           <article><span class="rule-number">01</span><div><strong>Индекс клёва 0–100</strong><p>Погода и суточный ритм дают основу; глубина и тип зоны подстраиваются под выбранную рыбу; уловы добавляют до +8 баллов, а промеры повышают уверенность.</p></div></article>
           <article><span class="rule-number">02</span><div><strong>«Жорная зона» = гипотеза</strong><p>Метки показывают сочетание свала, мелководья и протоки. Это место для первого заброса, а не обещание поклёвки.</p></div></article>
@@ -160,7 +170,7 @@
           <article><span class="rule-number">05</span><div><strong>Прогноз — подсказка</strong><p>Погодные данные обновляются при наличии сети и сохраняются локально. Без сети остаётся последний кэш и офлайн‑карта; спутниковый слой требует интернет.</p></div></article>
         </div>
         <section class="sources-section"><div class="section-heading"><div><p class="eyebrow">ИСТОЧНИКИ</p><h3>Откуда взялись слои</h3></div></div><div id="sourcesList" class="sources-list"></div></section>
-        <div class="about-footer"><span>Клёв рядом · бесплатный PWA‑прототип</span><span id="appVersion">v0.3 · touch‑map · offline‑first</span></div>
+        <div class="about-footer"><span>Клёв рядом · бесплатный PWA‑прототип</span><span id="appVersion">v0.4 · depth‑audit · offline‑first</span></div>
       </section>
     </main>
 
@@ -190,7 +200,7 @@
     </div>
   </div>
 
-  <script src="data.js"></script>
-  <script src="app.js" defer></script>
+  <script src="data.js?v=20260831-depth-audit-1"></script>
+  <script src="app.js?v=20260831-depth-audit-1" defer></script>
 </body>
 </html>
