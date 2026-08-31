@@ -69,6 +69,11 @@
             <canvas id="lakeCanvas" width="900" height="560" role="img" aria-label="Интерактивная модельная карта глубин"></canvas>
             <div class="map-floating map-floating-top"><span id="mapModeLabel">2D · модельная батиметрия</span><span class="north-arrow" aria-label="Север">N <i>↑</i></span></div>
             <div class="map-floating map-floating-bottom"><span id="mapHint">Нажмите на карту, чтобы поставить точку</span><span id="mapScale">—</span></div>
+            <div class="map-zoom" role="group" aria-label="Масштаб карты">
+              <button id="zoomOut" type="button" aria-label="Уменьшить масштаб">−</button>
+              <button id="zoomReset" type="button" aria-label="Сбросить масштаб">1×</button>
+              <button id="zoomIn" type="button" aria-label="Увеличить масштаб">＋</button>
+            </div>
             <div id="mapToast" class="map-toast" hidden></div>
           </div>
           <div class="map-footer">
@@ -101,6 +106,20 @@
           </article>
         </div>
 
+        <section class="conditions-section" aria-labelledby="conditionsHeading">
+          <div class="section-heading"><div><p class="eyebrow">РАЗБОР СЕЙЧАС</p><h2 id="conditionsHeading">Почему такой шанс</h2></div><span id="conditionsUpdated" class="muted-label">по погоде и ритму</span></div>
+          <div id="conditionCards" class="condition-grid"></div>
+          <div class="conditions-narrative">
+            <div class="narrative-icon" aria-hidden="true">✦</div>
+            <div><strong id="conditionsSummaryTitle">Считаю сочетание факторов</strong><p id="conditionsNarrative">Погода, световой день и выбранная рыба влияют на подсказку.</p><p id="conditionsAction" class="narrative-action">Первый шаг: проверьте ближайшую перспективную зону и сделайте промер.</p></div>
+          </div>
+        </section>
+
+        <section class="fish-section" aria-labelledby="fishHeading">
+          <div class="section-heading"><div><p class="eyebrow">ПОЛЕВОЙ СПРАВОЧНИК</p><h2 id="fishHeading">Кого искать в этом озере</h2></div><span id="fishLakeNote" class="muted-label">ориентир, не гарантия</span></div>
+          <div id="fishGuide" class="fish-grid"></div>
+        </section>
+
         <section class="compare-section" aria-labelledby="compareHeading">
           <div class="section-heading"><div><p class="eyebrow">СРАВНЕНИЕ</p><h2 id="compareHeading">Куда ехать сейчас</h2></div><span id="compareUpdated" class="muted-label">по одной погоде</span></div>
           <div id="compareList" class="compare-list"></div>
@@ -113,11 +132,12 @@
         <div class="forecast-summary">
           <div class="forecast-score"><span>сейчас</span><strong id="forecastScore">—</strong><small id="forecastScoreText">считаю условия</small></div>
           <div class="weather-now"><span id="forecastTemp">—</span><div><strong id="forecastWeatherText">—</strong><small id="forecastWeatherMeta">—</small></div></div>
-          <label class="species-select" for="fishSelect">Целевая рыба<select id="fishSelect"><option value="universal">универсально</option><option value="pike">щука</option><option value="perch">окунь</option><option value="roach">плотва / лещ</option><option value="burbot">налим</option></select></label>
+          <label class="species-select" for="fishSelect">Целевая рыба<select id="fishSelect"><option value="universal">универсально</option><option value="pike">щука</option><option value="perch">окунь</option><option value="roach">плотва</option><option value="bream">лещ</option><option value="burbot">налим</option><option value="zander">судак</option></select></label>
         </div>
         <div class="weather-strip" id="weatherStrip"></div>
         <section class="hourly-section"><div class="section-heading"><div><p class="eyebrow">СЛЕДУЮЩИЕ 12 ЧАСОВ</p><h3>Ритм клёва</h3></div><span class="confidence-chip" id="forecastConfidence">уверенность —</span></div><div id="hourlyForecast" class="hourly-scroll" aria-label="Почасовой прогноз"></div></section>
         <section class="best-times-section"><div class="section-heading"><div><p class="eyebrow">ПОДСКАЗКА МОДЕЛИ</p><h3>Три окна для старта</h3></div></div><div id="bestTimesList" class="best-times-list"></div></section>
+        <section class="forecast-detail-card" aria-labelledby="forecastDetailHeading"><div class="section-heading"><div><p class="eyebrow">ЧЕСТНЫЙ РАЗБОР</p><h3 id="forecastDetailHeading">Что двигает индекс</h3></div><span id="forecastDecision" class="confidence-chip">—</span></div><div id="forecastFactors" class="factor-list"></div><p id="forecastDetailNote" class="section-lead">Это объяснение модели, а не обещание улова. На воде подтвердите точку эхолотом или промером.</p></section>
         <section class="method-card"><div class="method-icon">⌁</div><div><strong>Как считается индекс</strong><p>Ветер, давление и его тренд, облачность, осадки, температура, рассвет/закат, сезон, выбранная рыба и ваши прошлые записи. Вес каждого фактора виден в «Данные и правила».</p></div></section>
       </section>
 
@@ -140,17 +160,18 @@
           <article><span class="rule-number">05</span><div><strong>Прогноз — подсказка</strong><p>Погодные данные обновляются при наличии сети и сохраняются локально. Без сети остаётся последний кэш и офлайн‑карта; спутниковый слой требует интернет.</p></div></article>
         </div>
         <section class="sources-section"><div class="section-heading"><div><p class="eyebrow">ИСТОЧНИКИ</p><h3>Откуда взялись слои</h3></div></div><div id="sourcesList" class="sources-list"></div></section>
-        <div class="about-footer"><span>Клёв рядом · бесплатный PWA‑прототип</span><span id="appVersion">v0.2 · offline‑first</span></div>
+        <div class="about-footer"><span>Клёв рядом · бесплатный PWA‑прототип</span><span id="appVersion">v0.3 · touch‑map · offline‑first</span></div>
       </section>
     </main>
 
-    <nav class="bottom-nav" aria-label="Разделы приложения">
-      <button class="nav-item is-active" type="button" data-screen-target="map" aria-current="page"><span>⌂</span><small>Карта</small></button>
-      <button class="nav-item" type="button" data-screen-target="forecast"><span>◷</span><small>Прогноз</small></button>
-      <button class="nav-item" type="button" data-screen-target="journal"><span>▤</span><small>Журнал</small></button>
-      <button class="nav-item" type="button" data-screen-target="about"><span>ⓘ</span><small>Данные</small></button>
-    </nav>
   </div>
+
+  <nav class="bottom-nav" aria-label="Разделы приложения">
+    <button class="nav-item is-active" type="button" data-screen-target="map" aria-current="page"><span>⌂</span><small>Карта</small></button>
+    <button class="nav-item" type="button" data-screen-target="forecast"><span>◷</span><small>Прогноз</small></button>
+    <button class="nav-item" type="button" data-screen-target="journal"><span>▤</span><small>Журнал</small></button>
+    <button class="nav-item" type="button" data-screen-target="about"><span>ⓘ</span><small>Данные</small></button>
+  </nav>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

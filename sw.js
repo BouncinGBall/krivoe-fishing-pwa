@@ -1,4 +1,4 @@
-const CACHE_NAME = "klev-ryadom-v4";
+const CACHE_NAME = "klev-ryadom-v5-touch-guide";
 const APP_SHELL = ["./", "./index.html", "./styles.css", "./data.js", "./app.js", "./manifest.webmanifest", "./sw.js", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {

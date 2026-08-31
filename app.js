@@ -3,6 +3,7 @@
 
   const lakes = window.LAKE_DATA;
   const lakeKeys = Object.keys(lakes);
+  const fishGuide = window.FISH_GUIDE || {};
   const STORAGE_KEY = "klev-ryadom-journal-v1";
   const SETTINGS_KEY = "klev-ryadom-settings-v1";
   const WEATHER_CACHE_KEY = "klev-ryadom-weather-v1";
@@ -17,6 +18,8 @@
   let depthVisible = true;
   let zonesVisible = true;
   let mapState = { scale: 1, panX: 0, panY: 0, user: null };
+  const activePointers = new Map();
+  let mapGesture = null;
   let weather = null;
   let weatherError = false;
   let journal = readJson(STORAGE_KEY, []);
@@ -82,6 +85,9 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePointModal(); });
     $("pointType").addEventListener("change", updatePointEstimate);
     $("pointDepth").addEventListener("input", updatePointEstimate);
+    $("zoomOut").addEventListener("click", () => zoomMap(.78));
+    $("zoomReset").addEventListener("click", () => resetMapView());
+    $("zoomIn").addEventListener("click", () => zoomMap(1.28));
     window.addEventListener("popstate", () => navigate(location.hash.slice(1) || "map", false));
     window.addEventListener("online", () => { setConnection("online", "онлайн"); fetchWeather(false); });
     window.addEventListener("offline", () => { setConnection("offline", "локально"); showToast("Нет сети — работаю по последнему прогнозу"); });
@@ -96,7 +102,7 @@
     canvas.addEventListener("pointermove", mapPointerMove);
     canvas.addEventListener("pointerup", mapPointerUp);
     canvas.addEventListener("pointercancel", mapPointerUp);
-    canvas.addEventListener("wheel", (event) => { event.preventDefault(); mapState.scale = clamp(mapState.scale * (event.deltaY > 0 ? .92 : 1.08), 1, 3); drawMap(); }, { passive: false });
+    canvas.addEventListener("wheel", (event) => { event.preventDefault(); const rect = canvas.getBoundingClientRect(); zoomMap(event.deltaY > 0 ? .92 : 1.08, { x: event.clientX - rect.left, y: event.clientY - rect.top }); }, { passive: false });
   }
 
   function navigate(target, push = true) {
@@ -122,7 +128,9 @@
     viewMode = mode;
     $("mode2d").classList.toggle("is-active", mode === "2d"); $("mode2d").setAttribute("aria-pressed", String(mode === "2d"));
     $("mode3d").classList.toggle("is-active", mode === "3d"); $("mode3d").setAttribute("aria-pressed", String(mode === "3d"));
-    $("mapModeLabel").textContent = mode === "3d" ? "3D · модельный рельеф" : "2D · модельная батиметрия";
+    $("mapModeLabel").textContent = mode === "3d" ? "3D · наклонный рельеф" : "2D · модельная батиметрия";
+    $("lakeCanvas").dataset.mode = mode;
+    renderMapMeta();
     drawMap();
   }
   function updateToggle(button, active) { button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); }
@@ -161,13 +169,13 @@
   }
   function localConditions(hour = new Date().getHours()) {
     const seasonal = Math.cos((hour - 13) / 24 * Math.PI * 2);
-    return { temperature: 15 + seasonal * 4, wind: 3.5, direction: 220, pressure: 1014, cloud: 45, rainProb: 12, code: 2, isDay: hour >= 5 && hour < 22 };
+    return { temperature: 15 + seasonal * 4, apparent: 15 + seasonal * 4, humidity: 72, precipitation: 0, wind: 3.5, direction: 220, pressure: 1014, cloud: 45, rainProb: 12, code: 2, isDay: hour >= 5 && hour < 22 };
   }
   function currentConditions() {
     if (weather && weather.current) {
       const c = weather.current;
       const pNow = Number(c.pressure_msl ?? 1014); const pBefore = weather?.hourly?.pressure_msl ? Number(weather.hourly.pressure_msl[Math.max(0, nearestHourIndex(weather.hourly.time) - 3)] ?? pNow) : pNow;
-      return { temperature: c.temperature_2m, wind: c.wind_speed_10m, direction: c.wind_direction_10m, pressure: pNow, pressureTrend: pNow - pBefore, cloud: c.cloud_cover, rainProb: currentHourly("precipitation_probability"), code: c.weather_code, isDay: c.is_day };
+      return { temperature: c.temperature_2m, apparent: c.apparent_temperature, humidity: c.relative_humidity_2m, precipitation: c.precipitation, wind: c.wind_speed_10m, direction: c.wind_direction_10m, pressure: pNow, pressureTrend: pNow - pBefore, cloud: c.cloud_cover, rainProb: currentHourly("precipitation_probability"), code: c.weather_code, isDay: c.is_day };
     }
     return localConditions();
   }
@@ -206,7 +214,10 @@
     if (kind === "pike") return clamp(.68 + (conditions.cloud > 45 ? .13 : 0) + (conditions.wind >= 2 && conditions.wind <= 7 ? .13 : 0) + (hour <= 9 || hour >= 18 ? .08 : 0), .3, 1);
     if (kind === "perch") return clamp(.63 + (hour >= 6 && hour <= 10 ? .18 : 0) + (temp > 8 && temp < 24 ? .1 : 0), .3, 1);
     if (kind === "roach") return clamp(.6 + (temp > 7 && temp < 20 ? .16 : 0) + (conditions.wind < 6 ? .08 : 0), .3, 1);
+    if (kind === "bream") return clamp(.58 + (temp > 8 && temp < 22 ? .14 : 0) + (hour <= 8 || hour >= 18 ? .14 : 0) + (conditions.wind < 7 ? .06 : 0), .3, 1);
     if (kind === "burbot") return clamp(.64 + (temp < 12 ? .2 : 0) + (hour >= 19 || hour <= 5 ? .12 : 0), .3, 1);
+    if (kind === "zander") return clamp(.59 + (hour >= 19 || hour <= 6 ? .19 : 0) + (conditions.cloud > 45 ? .09 : 0) + (conditions.wind <= 8 ? .06 : 0), .3, 1);
+    if (kind === "ruff") return clamp(.57 + (temp < 15 ? .18 : 0) + (hour >= 18 || hour <= 6 ? .1 : 0), .3, 1);
     return clamp(.65 + (conditions.wind >= 2 && conditions.wind <= 7 ? .12 : 0) + (conditions.cloud > 35 ? .06 : 0), .3, 1);
   }
   function scoreAt(date, kind = settings.fish, hotspot = null) {
@@ -230,7 +241,10 @@
       pike: { krivoe: 7, ulovnoe: 0, sukhodol: 4 },
       perch: { krivoe: 5, ulovnoe: 4, sukhodol: 1 },
       roach: { krivoe: -2, ulovnoe: 6, sukhodol: 5 },
-      burbot: { krivoe: -1, ulovnoe: 7, sukhodol: 2 }
+      bream: { krivoe: -3, ulovnoe: 5, sukhodol: 7 },
+      burbot: { krivoe: -1, ulovnoe: 7, sukhodol: 2 },
+      zander: { krivoe: -4, ulovnoe: 1, sukhodol: 5 },
+      ruff: { krivoe: 0, ulovnoe: 3, sukhodol: 1 }
     };
     score += (lakeBias[kind] || lakeBias.universal)[selectedLake] || 0;
     const localBoost = journal.filter((entry) => entry.lake === selectedLake && entry.type === "catch").length;
@@ -265,12 +279,12 @@
     $("currentWeather").textContent = fmt(c.temperature, 0) + "° · " + weatherIcon(c.code, c.isDay);
     $("currentWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа · " + weatherCodeText(c.code);
     $("depthSummary").textContent = l.depthLabel; $("depthMeta").textContent = l.depthSource + " · " + l.depthConfidence.toLowerCase();
-    renderMapMeta(); renderBestWindow(); renderBestZone(); renderCompare(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
+    renderMapMeta(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
     $("fishSelect").value = settings.fish;
   }
 
   function renderMapMeta() {
-    const l = lake(); const center = l.center; $("mapHint").textContent = viewMode === "3d" ? "Наклонённая схема · глубины смоделированы" : "Нажмите на карту, чтобы поставить точку"; $("mapScale").textContent = l.area + " · максимум " + l.maxDepth + " м"; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6);
+    const l = lake(); const center = l.center; $("mapHint").textContent = viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб"; $("mapScale").textContent = l.area + " · максимум " + l.maxDepth + " м"; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
   }
   function renderBestWindow() {
     const windows = bestWindows(3); const first = windows[0];
@@ -279,6 +293,74 @@
   function renderBestZone() {
     const l = lake(); const best = l.hotspots.map((spot) => ({ spot, score: scoreAt(new Date(), settings.fish, spot) })).sort((a, b) => b.score - a.score)[0];
     $("bestZone").textContent = best ? best.spot.name : "первый свал"; $("bestZoneMeta").textContent = best ? best.spot.depth + " · " + best.spot.species : "модельная перспективная зона"; $("bestZoneScore").textContent = best ? best.score + "/100" : "—";
+  }
+
+  function fishLabel(kind) {
+    if (kind === "universal") return "универсальная рыбалка";
+    return fishGuide[kind]?.label || kind;
+  }
+  function moonPhaseName(date = new Date()) {
+    const synodic = 29.530588853; const known = Date.UTC(2000, 0, 6, 18, 14); const phase = ((date.getTime() - known) / 86400000 / synodic) % 1; const p = phase < 0 ? phase + 1 : phase;
+    if (p < .03 || p >= .97) return "новолуние";
+    if (p < .22) return "растущий серп";
+    if (p < .28) return "первая четверть";
+    if (p < .47) return "растущая луна";
+    if (p < .53) return "полнолуние";
+    if (p < .72) return "убывающая луна";
+    if (p < .78) return "последняя четверть";
+    return "убывающий серп";
+  }
+  function lightPhase(date = new Date()) {
+    const solar = solarHours(date); const h = date.getHours() + date.getMinutes() / 60;
+    if (h < solar.sunrise - .7) return "предрассвет";
+    if (h < solar.sunrise + 1.8) return "утренний выход";
+    if (h > solar.sunset + .5) return "сумерки";
+    if (h > solar.sunset - 2.2) return "вечерняя кромка";
+    return "дневное окно";
+  }
+  function clockLabel(decimal) { const minutes = Math.round(Number(decimal || 0) * 60); const hours = Math.floor(minutes / 60) % 24; return String(hours).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0"); }
+  function windDetail(c) {
+    if (c.wind < 1.5) return "штиль: рябь слабая, ищите активность на мелководье";
+    if (c.wind <= 7) return "умеренная рябь: корм сносит к наветренной кромке";
+    if (c.wind <= 11) return "ветрено: кромка перспективна, но выходите осторожно";
+    return "сильный ветер: комфорт и безопасность важнее дальнего заброса";
+  }
+  function pressureDetail(c) {
+    if (c.pressureTrend > 1) return "растёт · часто короткое активное окно";
+    if (c.pressureTrend < -3) return "заметно падает · клёв может быть рваным";
+    if (c.pressure >= 1005 && c.pressure <= 1025) return "в рабочем диапазоне · без резкого скачка";
+    return "вне привычного диапазона · проверяйте несколько горизонтов";
+  }
+  function renderConditions() {
+    const l = lake(); const c = currentConditions(); const date = new Date(); const score = scoreAt(date); const solar = solarHours(date);
+    const cards = [
+      { icon: "≋", label: "Ветер", value: fmt(c.wind, 0) + " м/с · " + directionName(c.direction), detail: windDetail(c), tone: c.wind >= 1.5 && c.wind <= 7 ? "good" : c.wind > 10 ? "warn" : "neutral" },
+      { icon: "↕", label: "Давление", value: fmt(c.pressure, 0) + " гПа", detail: pressureDetail(c), tone: c.pressureTrend > 1 || (c.pressure >= 1005 && c.pressure <= 1025) ? "good" : c.pressureTrend < -3 ? "warn" : "neutral" },
+      { icon: weatherIcon(c.code, c.isDay), label: "Небо и дождь", value: fmt(c.cloud, 0) + "% облаков", detail: c.rainProb > 50 ? "осадки вероятны · нужен запасной план" : weatherCodeText(c.code) + " · осадки " + fmt(c.rainProb, 0) + "%", tone: c.rainProb > 65 ? "warn" : c.cloud >= 25 && c.cloud <= 80 ? "good" : "neutral" },
+      { icon: "☼", label: "Световой ритм", value: lightPhase(date), detail: "рассвет " + clockLabel(solar.sunrise) + " · закат " + clockLabel(solar.sunset), tone: dayPhaseScore(date) > .7 ? "good" : "neutral" },
+      { icon: "☾", label: "Лунный фон", value: moonPhaseName(date), detail: "ритмический бонус модели " + Math.round(moonScore(date) * 100) + "/100", tone: moonScore(date) > .65 ? "good" : "neutral" },
+      { icon: "°", label: "Ощущается", value: fmt(c.apparent, 0) + "° · " + fmt(c.humidity, 0) + "%", detail: "влажность · осадков сейчас " + fmt(c.precipitation, 1) + " мм", tone: c.humidity >= 45 && c.humidity <= 90 ? "neutral" : "warn" },
+      { icon: "⌁", label: "Рельеф и корм", value: l.depthLabel, detail: l.hotspots.length + " сценария для старта · " + l.depthConfidence.toLowerCase() + " уверенность", tone: l.depthConfidence.toLowerCase().includes("средняя") ? "good" : "neutral" }
+    ];
+    $("conditionCards").innerHTML = cards.map((x) => `<article class="condition-card tone-${x.tone}"><div class="condition-card-top"><span class="condition-icon">${x.icon}</span><span>${escapeHtml(x.label)}</span></div><strong>${escapeHtml(x.value)}</strong><p>${escapeHtml(x.detail)}</p></article>`).join("");
+    const target = fishLabel(settings.fish); const reasons = [];
+    if (c.wind >= 1.5 && c.wind <= 7) reasons.push("умеренная рябь помогает хищнику подойти к кромке"); else if (c.wind > 10) reasons.push("ветер добавляет риск и снижает точность подачи");
+    if (c.pressureTrend > 1) reasons.push("давление растёт — модель добавляет короткое активное окно"); else if (c.pressureTrend < -3) reasons.push("давление падает — стоит чаще менять горизонт");
+    if (dayPhaseScore(date) > .7) reasons.push(lightPhase(date) + " совпадает с суточным ритмом");
+    if (c.rainProb > 65) reasons.push("осадки могут быстро изменить активность и видимость приманки");
+    if (!reasons.length) reasons.push("условия ровные: рельеф и точность проводки важнее самой цифры");
+    const best = l.hotspots.map((spot) => ({ spot, score: scoreAt(date, settings.fish, spot) })).sort((a, b) => b.score - a.score)[0];
+    $("conditionsUpdated").textContent = weather ? "Open‑Meteo · сейчас" : "локальный сценарий";
+    $("conditionsSummaryTitle").textContent = scoreLabel(score) + " · цель: " + target;
+    $("conditionsNarrative").textContent = reasons.slice(0, 3).join("; ") + ".";
+    $("conditionsAction").textContent = best ? "Стартовый план: " + best.spot.name + " (" + best.spot.depth + ") · " + best.spot.reason + ". Сделайте 3–5 забросов и промер перед сменой точки." : "Стартовый план: найдите первый перепад глубины и проверьте его промером.";
+  }
+  function renderFishGuide() {
+    const l = lake(); const keys = l.fishKinds || []; const target = settings.fish; const date = new Date();
+    const cards = keys.map((kind) => { const guide = fishGuide[kind]; if (!guide) return ""; const best = l.hotspots.map((spot) => scoreAt(date, kind, spot)).sort((a, b) => b - a)[0] || scoreAt(date, kind); return `<button class="fish-card ${target === kind ? "is-target" : ""}" type="button" data-fish-target="${kind}" aria-pressed="${String(target === kind)}"><div class="fish-card-head"><span class="fish-icon">${guide.icon}</span><span><strong>${escapeHtml(guide.label)}</strong><small>${escapeHtml(guide.tag)}</small></span><b>${best}</b></div><p class="fish-where"><span>Где</span>${escapeHtml(guide.where)} · ${escapeHtml(guide.depth)}</p><p class="fish-when"><span>Когда</span>${escapeHtml(guide.when)}</p><p class="fish-tactic"><span>Как</span>${escapeHtml(guide.tactic)}</p><p class="fish-why">${escapeHtml(guide.why)}</p><small class="fish-confidence">${escapeHtml(guide.confidence)} · нажмите, чтобы выбрать целью</small></button>`; }).filter(Boolean).join("");
+    $("fishGuide").innerHTML = cards || `<p class="section-lead">Для этого водоёма пока нет карточек видов.</p>`;
+    $("fishLakeNote").textContent = "" + keys.length + " ориентиров · уточняйте уловы и правила";
+    qsa("[data-fish-target]").forEach((button) => button.addEventListener("click", () => { settings.fish = button.dataset.fishTarget; writeJson(SETTINGS_KEY, settings); renderAll(); showToast("Цель: " + fishLabel(settings.fish), 1600); }));
   }
   function bestWindows(count = 3) {
     const candidates = [];
@@ -300,10 +382,25 @@
   function renderForecast() {
     const l = lake(); const c = currentConditions(); const score = scoreAt(new Date());
     $("forecastIntro").textContent = "Почасовая оценка для " + l.name + "."; $("forecastScore").textContent = score; $("forecastScoreText").textContent = scoreLabel(score); $("forecastTemp").textContent = fmt(c.temperature, 0) + "°"; $("forecastWeatherText").textContent = weatherCodeText(c.code); $("forecastWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа"; $("forecastConfidence").textContent = "уверенность " + confidence() + "%";
-    const stats = [{ label: "ветер", value: fmt(c.wind, 0) + " м/с", note: directionName(c.direction) }, { label: "давление", value: fmt(c.pressure, 0) + " гПа", note: c.pressureTrend > 1 ? "растёт" : c.pressureTrend < -1 ? "падает" : "ровно" }, { label: "облачность", value: fmt(c.cloud, 0) + "%", note: c.cloud > 70 ? "много облаков" : "светлое небо" }, { label: "осадки", value: fmt(c.rainProb, 0) + "%", note: c.rainProb > 50 ? "возьмите дождевик" : "низкая вероятность" }];
+    const stats = [{ label: "ветер", value: fmt(c.wind, 0) + " м/с", note: directionName(c.direction) }, { label: "давление", value: fmt(c.pressure, 0) + " гПа", note: c.pressureTrend > 1 ? "растёт" : c.pressureTrend < -1 ? "падает" : "ровно" }, { label: "облачность", value: fmt(c.cloud, 0) + "%", note: c.cloud > 70 ? "много облаков" : "светлое небо" }, { label: "осадки", value: fmt(c.rainProb, 0) + "%", note: c.rainProb > 50 ? "возьмите дождевик" : "низкая вероятность" }, { label: "ощущается", value: fmt(c.apparent, 0) + "°", note: "влажность " + fmt(c.humidity, 0) + "%" }, { label: "осадков сейчас", value: fmt(c.precipitation, 1) + " мм", note: "по текущему часу" }];
     $("weatherStrip").innerHTML = stats.map((x) => `<div class="weather-stat"><span>${x.label}</span><strong>${x.value}</strong><small>${x.note}</small></div>`).join("");
     const hours = hourlyItems(); $("hourlyForecast").innerHTML = hours.map((x) => `<div class="hour-card ${x.best ? "is-best" : ""}"><time>${x.label}</time><span class="hour-icon">${weatherIcon(x.code, x.isDay)}</span><span class="hour-temp">${fmt(x.temp,0)}°</span><span class="hour-score">${x.score}</span><span class="hour-score-bar"><i style="width:${x.score}%"></i></span></div>`).join("");
     $("bestTimesList").innerHTML = bestWindows(3).map((x, i) => `<div class="best-time"><span class="best-time-rank">0${i + 1}</span><div><strong>${x.label}</strong><small>${x.reason}</small></div><b class="best-time-score">${x.score}</b></div>`).join("");
+    renderForecastDetails(c, score);
+  }
+  function renderForecastDetails(c, score) {
+    const date = new Date(); const l = lake(); const solar = solarHours(date); const fish = fishLabel(settings.fish); const targetGuide = settings.fish !== "universal" ? fishGuide[settings.fish] : null;
+    const factors = [
+      { label: "Световой ритм", value: Math.round(dayPhaseScore(date) * 100) + "/100", detail: lightPhase(date) + " · рассвет/закат задают основной пик", tone: dayPhaseScore(date) > .7 ? "good" : "neutral" },
+      { label: "Ветер и рябь", value: fmt(c.wind, 0) + " м/с", detail: windDetail(c), tone: c.wind >= 1.5 && c.wind <= 7 ? "good" : c.wind > 10 ? "warn" : "neutral" },
+      { label: "Давление", value: fmt(c.pressure, 0) + " гПа", detail: pressureDetail(c), tone: c.pressureTrend < -3 ? "warn" : "good" },
+      { label: "Небо и осадки", value: fmt(c.cloud, 0) + "% / " + fmt(c.rainProb, 0) + "%", detail: weatherCodeText(c.code) + " · " + (c.rainProb > 50 ? "держите запасной берег" : "видимость приманки обычно комфортная"), tone: c.rainProb > 65 ? "warn" : "neutral" },
+      { label: "Целевая рыба", value: fish, detail: targetGuide ? targetGuide.when + ". " + targetGuide.why : "выберите вид выше, чтобы усилить профиль условий", tone: targetGuide ? "good" : "neutral" },
+      { label: "Локальная поправка", value: "+" + Math.min(8, journal.filter((entry) => entry.lake === selectedLake && entry.type === "catch").length * 1.5).toFixed(1), detail: "реальные уловы из журнала; сохраняются только на этом устройстве", tone: "neutral" }
+    ];
+    $("forecastFactors").innerHTML = factors.map((x) => `<article class="factor-row tone-${x.tone}"><div><strong>${escapeHtml(x.label)}</strong><p>${escapeHtml(x.detail)}</p></div><b>${escapeHtml(x.value)}</b></article>`).join("");
+    $("forecastDecision").textContent = scoreLabel(score) + " · " + fish;
+    $("forecastDetailNote").textContent = "Модель учитывает рассвет " + clockLabel(solar.sunrise) + ", закат " + clockLabel(solar.sunset) + ", лунный фон и рельеф " + l.depthLabel.toLowerCase() + ". На воде подтвердите точку эхолотом или промером.";
   }
   function hourlyItems() {
     const out = []; const base = new Date(); base.setMinutes(0,0,0); const candidates = [];
@@ -353,6 +450,28 @@
     if (!popup) window.location.assign(url);
   }
 
+  function updateZoomUi() {
+    const reset = $("zoomReset"); if (!reset) return;
+    reset.textContent = (mapState.scale <= 1.01 ? "1" : mapState.scale.toFixed(1)) + "×";
+    $("zoomOut").disabled = mapState.scale <= 1.01;
+    $("zoomIn").disabled = mapState.scale >= 3.99;
+  }
+  function constrainMapPan(width, height) {
+    if (mapState.scale <= 1.001) { mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; return; }
+    const maxX = (mapState.scale - 1) * width * .62 + 14;
+    const maxY = (mapState.scale - 1) * height * .62 + 14;
+    mapState.panX = clamp(mapState.panX, -maxX, maxX); mapState.panY = clamp(mapState.panY, -maxY, maxY);
+  }
+  function resetMapView() { mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; drawMap(); showMapToast("Масштаб сброшен", 1400); }
+  function zoomMap(factor, focal) {
+    const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return;
+    const rect = canvas.getBoundingClientRect(); const width = rect.width; const height = rect.height; const cx = width / 2; const cy = height / 2;
+    const point = focal || { x: cx, y: cy }; const oldScale = mapState.scale; const nextScale = clamp(oldScale * factor, 1, 4);
+    const anchorX = cx + (point.x - cx - mapState.panX) / oldScale; const anchorY = cy + (point.y - cy - mapState.panY) / oldScale;
+    mapState.scale = nextScale; mapState.panX = point.x - cx - nextScale * (anchorX - cx); mapState.panY = point.y - cy - nextScale * (anchorY - cy);
+    constrainMapPan(width, height); drawMap();
+  }
+
   function projectPoint(lat, lon, width, height, bounds, pad = 24) {
     const x = pad + (lon - bounds.minLon) / (bounds.maxLon - bounds.minLon || 1) * (width - pad * 2);
     const y = height - pad - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat || 1) * (height - pad * 2); return { x, y };
@@ -360,27 +479,60 @@
   function mapBounds() { const points = lake().geometry.concat(selectedLake === "sukhodol" ? window.BURNAYA_PATH : []); return { minLat: Math.min(...points.map((p) => p[0])), maxLat: Math.max(...points.map((p) => p[0])), minLon: Math.min(...points.map((p) => p[1])), maxLon: Math.max(...points.map((p) => p[1])) }; }
   function resizeCanvas() { const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ratio = Math.min(window.devicePixelRatio || 1, 2); const w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio); canvas.dataset.pixelRatio = String(ratio); if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } drawMap(); }
   function drawMap() {
-    const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
-    drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34));
-    ctx.save(); const cx=w/2,cy=h/2; ctx.translate(cx + mapState.panX * (w/900), cy + mapState.panY * (h/560)); ctx.scale(mapState.scale, mapState.scale); ctx.translate(-cx,-cy);
-    drawLand(ctx,w,h,bounds); if (viewMode === "3d") drawTerrainGrid(ctx,w,h,base); drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); ctx.restore();
+    const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; constrainMapPan(w, h); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
+    drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34)); drawLand(ctx,w,h,bounds);
+    ctx.save(); if (viewMode === "3d") applyTerrainTransform(ctx,w,h); const cx=w/2,cy=h/2; ctx.translate(cx + mapState.panX, cy + mapState.panY); ctx.scale(mapState.scale, mapState.scale); ctx.translate(-cx,-cy);
+    if (viewMode === "3d") { drawTerrainShadow(ctx,base,w,h); drawTerrainGrid(ctx,w,h,base); } drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base,viewMode === "3d"); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); ctx.restore(); updateZoomUi();
   }
   function drawMapBackground(ctx,w,h) { const g = ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,"#12353a"); g.addColorStop(1,"#071d23"); ctx.fillStyle=g;ctx.fillRect(0,0,w,h); ctx.strokeStyle="rgba(159,231,199,.07)";ctx.lineWidth=1; const step=Math.max(40,w/14); for(let x=0;x<w;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();} for(let y=0;y<h;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();} }
   function drawLand(ctx,w,h,bounds) { ctx.fillStyle="rgba(31,69,56,.45)"; ctx.fillRect(0,0,w,h); ctx.fillStyle="rgba(83,125,89,.12)"; for(let i=0;i<18;i++){const x=(i*173)%w,y=(i*97)%h;ctx.beginPath();ctx.arc(x,y,7+(i%4)*3,0,Math.PI*2);ctx.fill();} }
   function pathPolygon(ctx,points) { ctx.beginPath(); points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); }
-  function drawWater(ctx,points,tilted) { pathPolygon(ctx,points); const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height); g.addColorStop(0, tilted ? "rgba(109,187,204,.58)" : "rgba(72,153,171,.62)");g.addColorStop(1,"rgba(17,68,91,.78)");ctx.fillStyle=g;ctx.fill();ctx.strokeStyle="rgba(159,231,199,.78)";ctx.lineWidth=2;ctx.stroke(); if(tilted){ctx.save();ctx.globalAlpha=.15;ctx.translate(0,12);pathPolygon(ctx,points);ctx.fillStyle="#001318";ctx.fill();ctx.restore();} }
-  function drawDepthBands(ctx,points) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const center=points.reduce((a,p)=>({x:a.x+p.x/points.length,y:a.y+p.y/points.length}),{x:0,y:0}); const max=Math.max(...lake().contourLevels); lake().contourLevels.slice().reverse().forEach((level,i)=>{const f=.18 + .68*(level/max); const ring=points.map((p)=>({x:center.x+(p.x-center.x)*f,y:center.y+(p.y-center.y)*f})); pathPolygon(ctx,ring);ctx.fillStyle=`rgba(${28+i*8},${95+i*12},${130+i*10},${.06+i*.012})`;ctx.fill();ctx.strokeStyle=`rgba(159,231,199,${.10+i*.012})`;ctx.lineWidth=1;ctx.stroke(); }); ctx.save();ctx.font=Math.max(10,w/105).toFixed(0)+"px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.72)";ctx.textAlign="center"; lake().contourLevels.forEach((level,i)=>{const a=-.8+i/(lake().contourLevels.length-1)*2.1; const rx=center.x+Math.cos(a)*Math.min(w*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.x-center.x)),0))*(.32+i*.07); const ry=center.y+Math.sin(a)*Math.min(h*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.y-center.y)),0))*(.32+i*.07);ctx.fillText(level+" м",rx,ry);});ctx.restore(); }
-  function drawTerrainGrid(ctx,w,h,points) { ctx.save();ctx.globalAlpha=.2;ctx.strokeStyle="#b4eddb";ctx.lineWidth=1;const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y)); for(let i=0;i<7;i++){const y=minY+(maxY-minY)*i/6;ctx.beginPath();ctx.moveTo(minX,y);ctx.lineTo(maxX,y-30);ctx.stroke();} for(let i=0;i<9;i++){const x=minX+(maxX-minX)*i/8;ctx.beginPath();ctx.moveTo(x,minY);ctx.lineTo(x-25,maxY);ctx.stroke();}ctx.restore(); }
+  function applyTerrainTransform(ctx,w,h) { const tilt = .64; const offset = Math.min(64, Math.max(34, h * .14)); ctx.translate(w / 2, h / 2 + offset); ctx.scale(1, tilt); ctx.translate(-w / 2, -h / 2); }
+  function terrainInverseY(y,h) { const tilt = .64; const offset = Math.min(64, Math.max(34, h * .14)); return h / 2 + (y - h / 2 - offset) / tilt; }
+  function drawTerrainShadow(ctx,points,w,h) { ctx.save(); ctx.globalAlpha = .28; for (let i = 8; i >= 1; i--) { pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + i * 4 }))); ctx.fillStyle = `rgba(0,10,15,${.035 + i * .012})`; ctx.fill(); } ctx.globalAlpha = .5; pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + 34 }))); ctx.strokeStyle = "rgba(1,13,18,.65)"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
+  function drawWater(ctx,points,tilted) { pathPolygon(ctx,points); const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height); g.addColorStop(0, tilted ? "rgba(136,211,220,.78)" : "rgba(72,153,171,.62)");g.addColorStop(.42, tilted ? "rgba(49,128,151,.78)" : "rgba(39,116,139,.67)");g.addColorStop(1,"rgba(12,54,76,.88)");ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=tilted ? "rgba(203,249,232,.92)" : "rgba(159,231,199,.78)";ctx.lineWidth=tilted ? 2.4 : 2;ctx.stroke(); if(tilted){ctx.save();ctx.globalAlpha=.32;pathPolygon(ctx,points.map((p)=>({x:p.x,y:p.y-2})));ctx.strokeStyle="#e3fff4";ctx.lineWidth=1;ctx.stroke();ctx.restore();} }
+  function drawDepthBands(ctx,points,tilted=false) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const center=points.reduce((a,p)=>({x:a.x+p.x/points.length,y:a.y+p.y/points.length}),{x:0,y:0}); const max=Math.max(...lake().contourLevels); lake().contourLevels.slice().reverse().forEach((level,i)=>{const f=.18 + .68*(level/max); const ring=points.map((p)=>({x:center.x+(p.x-center.x)*f,y:center.y+(p.y-center.y)*f})); pathPolygon(ctx,ring);const alpha=tilted ? .105+i*.018 : .06+i*.012;ctx.fillStyle=`rgba(${28+i*8},${95+i*12},${130+i*10},${alpha})`;ctx.fill();ctx.strokeStyle=`rgba(185,242,224,${tilted ? .18+i*.025 : .10+i*.012})`;ctx.lineWidth=tilted ? 1.2 : 1;ctx.stroke(); }); ctx.save();ctx.font=Math.max(10,w/105).toFixed(0)+"px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.78)";ctx.textAlign="center"; lake().contourLevels.forEach((level,i)=>{const a=-.8+i/(lake().contourLevels.length-1)*2.1; const rx=center.x+Math.cos(a)*Math.min(w*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.x-center.x)),0))*(.32+i*.07); const ry=center.y+Math.sin(a)*Math.min(h*.22,points.reduce((m,p)=>Math.max(m,Math.abs(p.y-center.y)),0))*(.32+i*.07);ctx.fillText(level+" м",rx,ry);});ctx.restore(); }
+  function drawTerrainGrid(ctx,w,h,points) { ctx.save();ctx.globalAlpha=.32;ctx.strokeStyle="#d0f5e9";ctx.lineWidth=1;const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y)); for(let i=0;i<9;i++){const y=minY+(maxY-minY)*i/8;ctx.beginPath();ctx.moveTo(minX-20,y);ctx.lineTo(maxX+20,y-42-i*2);ctx.stroke();} for(let i=0;i<11;i++){const x=minX+(maxX-minX)*i/10;ctx.beginPath();ctx.moveTo(x,minY-8);ctx.lineTo(x-42,maxY+8);ctx.stroke();} ctx.globalAlpha=.24; ctx.strokeStyle="#0a3245"; for(let i=0;i<5;i++){const y=minY+(maxY-minY)*(.14+i*.18);ctx.beginPath();ctx.moveTo(minX,y);ctx.quadraticCurveTo((minX+maxX)/2,y-18,maxX,y-34);ctx.stroke();}ctx.restore(); }
   function drawRiver(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const path=window.BURNAYA_PATH.map((p)=>projectPoint(p[0],p[1],w,h,bounds,34)); ctx.save();ctx.strokeStyle="#f3d889";ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([7,5]);ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#f3d889";ctx.font="11px -apple-system, sans-serif";const mid=path[Math.floor(path.length/2)];ctx.fillText("р. Бурная · проверьте правила",mid.x+8,mid.y-8);ctx.restore(); }
   function drawHotspots(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; ctx.save(); lake().hotspots.forEach((spot,i)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34);const r=Math.max(16,w/48);const score=scoreAt(new Date(),settings.fish,spot);ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fillStyle="rgba(243,216,137,.15)";ctx.fill();ctx.strokeStyle="rgba(243,216,137,.65)";ctx.setLineDash([3,3]);ctx.lineWidth=1.3;ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fillStyle="#f3d889";ctx.fill(); if(i===0 || w>650){ctx.font="11px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.9)";ctx.textAlign="left";ctx.fillText(spot.name+" · "+score,p.x+r+4,p.y+4);}});ctx.restore(); }
   function drawUser(ctx,p) { ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,10,0,Math.PI*2);ctx.fillStyle="#65cfe0";ctx.fill();ctx.strokeStyle="#e9ffff";ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(p.x,p.y,18,0,Math.PI*2);ctx.strokeStyle="rgba(101,207,224,.45)";ctx.lineWidth=2;ctx.stroke();ctx.restore(); }
   function drawJournalPoints(ctx,w,h,bounds) { const entries=journal.filter((entry)=>entry.lake===selectedLake); if(!entries.length)return; ctx.save(); entries.forEach((entry)=>{const p=projectPoint(entry.lat,entry.lon,w,h,bounds,34);ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle=entry.type==="catch"?"#f17973":"#65cfe0";ctx.fill();ctx.strokeStyle="#07181d";ctx.lineWidth=2;ctx.stroke();}); ctx.restore(); }
   function estimateDepth(lat,lon) { const c=lake().focus || lake().center; const dx=(lon-c[1])*111320*Math.cos(c[0]*Math.PI/180),dy=(lat-c[0])*111320; const d=Math.sqrt(dx*dx+dy*dy); const max=lake().maxDepth; return clamp(max*(.18+.82*(1-Math.min(1,d/1200))), .7, max); }
-  let drag = null;
-  function mapPointerDown(event) { const canvas=event.currentTarget; drag={x:event.clientX,y:event.clientY,moved:false}; canvas.setPointerCapture?.(event.pointerId); }
-  function mapPointerMove(event) { if(!drag)return; const dx=event.clientX-drag.x,dy=event.clientY-drag.y; if(Math.abs(dx)+Math.abs(dy)>5)drag.moved=true; if(drag.moved){mapState.panX+=dx;mapState.panY+=dy;drag.x=event.clientX;drag.y=event.clientY;drawMap();} }
-  function mapPointerUp(event) { if(!drag)return; const moved=drag.moved; drag=null; if(!moved){const rect=event.currentTarget.getBoundingClientRect(); const bounds=mapBounds(); const x=event.clientX-rect.left, y=event.clientY-rect.top; const p=unprojectPoint(x,y,rect.width,rect.height,bounds,34); const hotspot=nearestHotspot(p.lat,p.lon,rect.width,rect.height,bounds); if (hotspot) showMapToast(hotspot.name + " · " + hotspot.depth + " · " + hotspot.species + " · шанс " + scoreAt(new Date(), settings.fish, hotspot)); else if (pointInPolygon([p.lat,p.lon], lake().geometry)) openPointModal(p); else showMapToast("Точка вне контура воды — приблизьте карту к берегу");} }
-  function unprojectPoint(x,y,w,h,bounds,pad=24) { const cx=w/2,cy=h/2; const rawX=(x-cx-mapState.panX*(w/900))/mapState.scale+cx; const rawY=(y-cy-mapState.panY*(h/560))/mapState.scale+cy; return { lon: bounds.minLon + clamp((rawX-pad)/(w-pad*2),0,1)*(bounds.maxLon-bounds.minLon), lat: bounds.minLat + clamp((h-pad-rawY)/(h-pad*2),0,1)*(bounds.maxLat-bounds.minLat) }; }
+  function pointerDistance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function pointerCenter(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  function mapPointerDown(event) {
+    const canvas = event.currentTarget; try { canvas.setPointerCapture?.(event.pointerId); } catch (_) {} activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.size === 1) { mapGesture = { type: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false, multi: false }; return; }
+    if (activePointers.size >= 2) {
+      const points = Array.from(activePointers.values()).slice(0, 2); const center = pointerCenter(points[0], points[1]);
+      mapGesture = { type: "pinch", startDistance: Math.max(1, pointerDistance(points[0], points[1])), startCenter: center, startScale: mapState.scale, startPanX: mapState.panX, startPanY: mapState.panY, multi: true };
+    }
+  }
+  function mapPointerMove(event) {
+    if (!activePointers.has(event.pointerId)) return; activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const canvas = event.currentTarget; const rect = canvas.getBoundingClientRect(); const width = rect.width, height = rect.height;
+    if (activePointers.size >= 2 && mapGesture?.type === "pinch") {
+      const points = Array.from(activePointers.values()).slice(0, 2); const center = pointerCenter(points[0], points[1]); const distance = Math.max(1, pointerDistance(points[0], points[1])); const startX = mapGesture.startCenter.x - rect.left, startY = mapGesture.startCenter.y - rect.top; const currentX = center.x - rect.left, currentY = center.y - rect.top; const cx = width / 2, cy = height / 2; const anchorX = cx + (startX - cx - mapGesture.startPanX) / mapGesture.startScale; const anchorY = cy + (startY - cy - mapGesture.startPanY) / mapGesture.startScale;
+      mapState.scale = clamp(mapGesture.startScale * distance / mapGesture.startDistance, 1, 4); mapState.panX = currentX - cx - mapState.scale * (anchorX - cx); mapState.panY = currentY - cy - mapState.scale * (anchorY - cy); constrainMapPan(width, height); drawMap(); return;
+    }
+    if (activePointers.size === 1 && mapGesture?.type === "pan" && mapGesture.pointerId === event.pointerId) {
+      const dx = event.clientX - mapGesture.lastX, dy = event.clientY - mapGesture.lastY; if (Math.abs(dx) + Math.abs(dy) > 5) mapGesture.moved = true;
+      if (mapGesture.moved && mapState.scale > 1) { mapState.panX += dx; mapState.panY += dy; constrainMapPan(width, height); drawMap(); }
+      mapGesture.lastX = event.clientX; mapGesture.lastY = event.clientY;
+    }
+  }
+  function mapPointerUp(event) {
+    const wasGesture = mapGesture; const wasMulti = Boolean(wasGesture?.multi || wasGesture?.type === "pinch"); activePointers.delete(event.pointerId); try { event.currentTarget.releasePointerCapture?.(event.pointerId); } catch (_) {}
+    if (activePointers.size === 1) { const remaining = Array.from(activePointers.entries())[0]; if (wasMulti) mapGesture = { type: "pan", pointerId: remaining[0], lastX: remaining[1].x, lastY: remaining[1].y, moved: true, multi: true }; return; }
+    if (activePointers.size > 1) return;
+    if (!wasMulti && wasGesture?.type === "pan" && !wasGesture.moved) handleMapTap(event);
+    mapGesture = null;
+  }
+  function handleMapTap(event) {
+    const rect = event.currentTarget.getBoundingClientRect(); const bounds = mapBounds(); const x = event.clientX - rect.left, y = event.clientY - rect.top; const p = unprojectPoint(x, y, rect.width, rect.height, bounds, 34); const hotspot = nearestHotspot(p.lat, p.lon, rect.width, rect.height, bounds);
+    if (hotspot) showMapToast(hotspot.name + " · " + hotspot.depth + " · " + hotspot.species + " · шанс " + scoreAt(new Date(), settings.fish, hotspot)); else if (pointInPolygon([p.lat, p.lon], lake().geometry)) openPointModal(p); else showMapToast("Точка вне контура воды — приблизьте карту к берегу");
+  }
+  function unprojectPoint(x,y,w,h,bounds,pad=24) { let screenY = y; if (viewMode === "3d") screenY = terrainInverseY(screenY, h); const cx=w/2,cy=h/2; const rawX=(x-cx-mapState.panX)/mapState.scale+cx; const rawY=(screenY-cy-mapState.panY)/mapState.scale+cy; return { lon: bounds.minLon + clamp((rawX-pad)/(w-pad*2),0,1)*(bounds.maxLon-bounds.minLon), lat: bounds.minLat + clamp((h-pad-rawY)/(h-pad*2),0,1)*(bounds.maxLat-bounds.minLat) }; }
   function pointInPolygon(point, polygon) { const lat=point[0],lon=point[1]; let inside=false; for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){const yi=polygon[i][0],xi=polygon[i][1],yj=polygon[j][0],xj=polygon[j][1]; const intersect=((xi>lon)!=(xj>lon)) && (lat < (yj-yi)*(lon-xi)/(xj-xi || 1e-12)+yi); if(intersect) inside=!inside;} return inside; }
   function nearestHotspot(lat,lon,w,h,bounds) { let best=null,bestPx=Infinity; lake().hotspots.forEach((spot)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34); const q=projectPoint(lat,lon,w,h,bounds,34); const d=Math.hypot(p.x-q.x,p.y-q.y); if(d<bestPx){bestPx=d;best=spot;}}); return bestPx<Math.max(24,w*.07) ? best : null; }
   let mapToastTimer=null;
