@@ -1,5 +1,5 @@
-const CACHE_NAME = "klev-ryadom-v7-fish-map";
-const ASSET_VERSION = "20260831-fish-map-2";
+const CACHE_NAME = "klev-ryadom-v8-hybrid-calm";
+const ASSET_VERSION = "20260901-hybrid-calm-4";
 const APP_SHELL = [
   "./",
   "./index.html",

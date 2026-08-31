@@ -11,7 +11,8 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
-  <link rel="stylesheet" href="styles.css?v=20260831-fish-map-2">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <link rel="stylesheet" href="styles.css?v=20260901-hybrid-calm-4">
   <title>Клёв рядом · Карта озёр</title>
 </head>
 <body>
@@ -57,6 +58,7 @@
           <div class="map-toolbar">
             <div class="segmented" role="group" aria-label="Режим карты">
               <button id="mode2d" class="is-active" type="button" aria-pressed="true">2D карта</button>
+              <button id="modeHybrid" type="button" aria-pressed="false">Гибрид</button>
               <button id="mode3d" type="button" aria-pressed="false">3D рельеф</button>
             </div>
             <label class="map-fish-select" for="mapFishSelect"><span>Рыба на карте</span><select id="mapFishSelect" aria-label="Выбрать рыбу для точек на карте"><option value="universal">все виды</option></select></label>
@@ -68,6 +70,7 @@
           </div>
           <div class="canvas-wrap">
             <canvas id="lakeCanvas" width="900" height="560" role="img" aria-label="Интерактивная модельная карта глубин"></canvas>
+            <div id="leafletMap" class="leaflet-map" role="application" aria-label="Географическая карта выбранного озера" hidden></div>
             <div class="map-floating map-floating-top"><span id="mapModeLabel">2D · модельная батиметрия</span><span id="mapFishLabel" class="map-fish-label">рыба: все виды</span><span class="north-arrow" aria-label="Север">N <i>↑</i></span></div>
             <div class="map-floating map-floating-bottom"><span id="mapHint">Нажмите на карту, чтобы поставить точку</span><span id="mapScale">—</span></div>
             <div class="map-zoom" role="group" aria-label="Масштаб карты">
@@ -206,7 +209,8 @@
     </div>
   </div>
 
-  <script src="data.js?v=20260831-fish-map-2"></script>
-  <script src="app.js?v=20260831-fish-map-2" defer></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script src="data.js?v=20260901-hybrid-calm-4"></script>
+  <script src="app.js?v=20260901-hybrid-calm-4" defer></script>
 </body>
 </html>

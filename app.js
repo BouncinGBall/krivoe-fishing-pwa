@@ -15,6 +15,10 @@
   const now = new Date();
   let selectedLake = "krivoe";
   let viewMode = "2d";
+  let leafletMap = null;
+  let leafletLayers = [];
+  let leafletBaseLayer = null;
+  let leafletLibraryPromise = null;
   let depthVisible = true;
   let zonesVisible = true;
   let mapState = { scale: 1, panX: 0, panY: 0, user: null };
@@ -63,10 +67,11 @@
     qsa("[data-screen-target]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.screenTarget)));
     qsa(".lake-tab").forEach((button) => button.addEventListener("click", () => selectLake(button.dataset.lake)));
     $("mode2d").addEventListener("click", () => setMode("2d"));
+    $("modeHybrid").addEventListener("click", () => setMode("hybrid"));
     $("mode3d").addEventListener("click", () => setMode("3d"));
     $("mapFishSelect").addEventListener("change", (event) => { settings.fish = event.target.value; writeJson(SETTINGS_KEY, settings); renderAll(); showToast("На карте: " + fishLabel(settings.fish), 1600); });
-    $("depthToggle").addEventListener("click", () => { depthVisible = !depthVisible; updateToggle($("depthToggle"), depthVisible); drawMap(); });
-    $("zonesToggle").addEventListener("click", () => { zonesVisible = !zonesVisible; updateToggle($("zonesToggle"), zonesVisible); drawMap(); });
+    $("depthToggle").addEventListener("click", () => { depthVisible = !depthVisible; updateToggle($("depthToggle"), depthVisible); viewMode === "hybrid" ? renderLeafletOverlays() : drawMap(); });
+    $("zonesToggle").addEventListener("click", () => { zonesVisible = !zonesVisible; updateToggle($("zonesToggle"), zonesVisible); viewMode === "hybrid" ? renderLeafletOverlays() : drawMap(); });
     $("locateButton").addEventListener("click", locateUser);
     $("addPointButton").addEventListener("click", () => openPointModal());
     $("copyCoordinates").addEventListener("click", copyCoordinates);
@@ -104,6 +109,8 @@
     canvas.addEventListener("pointerup", mapPointerUp);
     canvas.addEventListener("pointercancel", mapPointerUp);
     canvas.addEventListener("wheel", (event) => { event.preventDefault(); const rect = canvas.getBoundingClientRect(); zoomMap(event.deltaY > 0 ? .92 : 1.08, { x: event.clientX - rect.left, y: event.clientY - rect.top }); }, { passive: false });
+    const hybridSurface = $("leafletMap");
+    hybridSurface?.addEventListener("click", (event) => { if (event.target.closest?.(".leaflet-marker-icon, .leaflet-interactive, .leaflet-control")) return; });
   }
 
   function navigate(target, push = true) {
@@ -112,7 +119,7 @@
     qsa(".screen").forEach((screen) => { const active = screen.dataset.screen === target; screen.hidden = !active; screen.classList.toggle("is-active", active); });
     qsa(".nav-item").forEach((button) => { const active = button.dataset.screenTarget === target; button.classList.toggle("is-active", active); if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); });
     if (push && location.hash !== "#" + target) history.pushState({}, "", "#" + target);
-    if (target === "map") requestAnimationFrame(resizeCanvas);
+    if (target === "map") requestAnimationFrame(() => { resizeCanvas(); syncMapSurface(); });
     if (target === "journal") renderJournal();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -122,17 +129,19 @@
     selectedLake = key; mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; mapState.user = null; weather = null; weatherError = false; restoreWeatherCache(key);
     qsa(".lake-tab").forEach((button) => { const active = button.dataset.lake === key; button.classList.toggle("is-selected", active); button.setAttribute("aria-selected", String(active)); });
     renderAll();
+    if (viewMode === "hybrid") syncMapSurface();
     showToast(lakes[key].name + " · карта обновлена", 1800); fetchWeather(false);
   }
 
   function setMode(mode) {
     viewMode = mode;
     $("mode2d").classList.toggle("is-active", mode === "2d"); $("mode2d").setAttribute("aria-pressed", String(mode === "2d"));
+    $("modeHybrid").classList.toggle("is-active", mode === "hybrid"); $("modeHybrid").setAttribute("aria-pressed", String(mode === "hybrid"));
     $("mode3d").classList.toggle("is-active", mode === "3d"); $("mode3d").setAttribute("aria-pressed", String(mode === "3d"));
-    $("mapModeLabel").textContent = mode === "3d" ? "3D · наклонный рельеф" : "2D · модельная батиметрия";
+    $("mapModeLabel").textContent = mode === "3d" ? "3D · наклонный рельеф" : mode === "hybrid" ? "Гибрид · спутник + рельеф" : "2D · модельная батиметрия";
     $("lakeCanvas").dataset.mode = mode;
     renderMapMeta();
-    drawMap();
+    syncMapSurface();
   }
   function updateToggle(button, active) { button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); }
 
@@ -280,7 +289,7 @@
     $("currentWeather").textContent = fmt(c.temperature, 0) + "° · " + weatherIcon(c.code, c.isDay);
     $("currentWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа · " + weatherCodeText(c.code);
     $("depthSummary").textContent = l.depthLabel; $("depthMeta").textContent = l.depthSource + " · " + l.depthConfidence.toLowerCase();
-    renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderFishMapGuide(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
+    renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderFishMapGuide(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas(); if (viewMode === "hybrid") syncMapSurface();
     $("fishSelect").value = settings.fish;
     const mapFishSelect = $("mapFishSelect"); if (mapFishSelect) { mapFishSelect.value = settings.fish; }
   }
@@ -290,7 +299,9 @@
     return Number.isFinite(n) ? n.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) + " м" : "—";
   }
   function renderMapMeta() {
-    const l = lake(); const center = l.center; const target = fishLabel(settings.fish); $("mapHint").textContent = (viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб") + " · точки: " + target; $("mapFishLabel").textContent = "рыба: " + target; $("mapScale").textContent = l.area + " · " + l.depthLabel; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
+    const l = lake(); const center = l.center; const target = fishLabel(settings.fish);
+    const hint = viewMode === "hybrid" ? "Масштабируйте двумя пальцами · реальные тайлы требуют сети" : viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб";
+    $("mapHint").textContent = hint + " · точки: " + target; $("mapFishLabel").textContent = "рыба: " + target; $("mapScale").textContent = l.area + " · " + l.depthLabel; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
   }
   function renderDepthScale() {
     const l = lake(); const levels = Array.isArray(l.contourLevels) ? l.contourLevels : [];
@@ -329,6 +340,7 @@
   }
   function focusHotspot(id) {
     const spot = (lake().hotspots || []).find((item) => item.id === id); if (!spot) return;
+    if (viewMode === "hybrid" && leafletMap) { leafletMap.setView([spot.lat, spot.lon], Math.max(leafletMap.getZoom(), 15), { animate: true }); showMapToast(spot.name + " · " + spot.depth + " · " + fishLabel(settings.fish), 2600); return; }
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return;
     const bounds = mapBounds(); const p = projectPoint(spot.lat, spot.lon, canvas.clientWidth, canvas.clientHeight, bounds, 34); const cx = canvas.clientWidth / 2; const cy = canvas.clientHeight / 2;
     mapState.scale = Math.max(mapState.scale, 1.65); mapState.panX = cx - (cx + (p.x - cx) * mapState.scale); mapState.panY = cy - (cy + (p.y - cy) * mapState.scale); constrainMapPan(canvas.clientWidth, canvas.clientHeight); drawMap(); showMapToast(spot.name + " · " + spot.depth + " · " + fishLabel(settings.fish), 2600);
@@ -499,6 +511,7 @@
 
   function updateZoomUi() {
     const reset = $("zoomReset"); if (!reset) return;
+    if (viewMode === "hybrid" && leafletMap) { const z = leafletMap.getZoom(); reset.textContent = z.toFixed(1) + "×"; $("zoomOut").disabled = z <= 9; $("zoomIn").disabled = z >= 19; return; }
     reset.textContent = (mapState.scale <= 1.01 ? "1" : mapState.scale.toFixed(1)) + "×";
     $("zoomOut").disabled = mapState.scale <= 1.01;
     $("zoomIn").disabled = mapState.scale >= 3.99;
@@ -509,8 +522,9 @@
     const maxY = (mapState.scale - 1) * height * .62 + 14;
     mapState.panX = clamp(mapState.panX, -maxX, maxX); mapState.panY = clamp(mapState.panY, -maxY, maxY);
   }
-  function resetMapView() { mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; drawMap(); showMapToast("Масштаб сброшен", 1400); }
+  function resetMapView() { if (viewMode === "hybrid" && leafletMap) { const l = lake(); leafletMap.fitBounds(window.L.latLngBounds(l.geometry.map((p) => [p[0], p[1]])).pad(.08), { animate: true }); showMapToast("Масштаб сброшен", 1400); return; } mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; drawMap(); showMapToast("Масштаб сброшен", 1400); }
   function zoomMap(factor, focal) {
+    if (viewMode === "hybrid" && leafletMap) { const current = leafletMap.getZoom(); leafletMap.setZoom(clamp(current + Math.log2(factor), 9, 19), { animate: true }); return; }
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return;
     const rect = canvas.getBoundingClientRect(); const width = rect.width; const height = rect.height; const cx = width / 2; const cy = height / 2;
     const point = focal || { x: cx, y: cy }; const oldScale = mapState.scale; const nextScale = clamp(oldScale * factor, 1, 4);
@@ -524,7 +538,48 @@
     const y = height - pad - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat || 1) * (height - pad * 2); return { x, y };
   }
   function mapBounds() { const points = lake().geometry.concat(selectedLake === "sukhodol" ? window.BURNAYA_PATH : []); return { minLat: Math.min(...points.map((p) => p[0])), maxLat: Math.max(...points.map((p) => p[0])), minLon: Math.min(...points.map((p) => p[1])), maxLon: Math.max(...points.map((p) => p[1])) }; }
-  function resizeCanvas() { const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ratio = Math.min(window.devicePixelRatio || 1, 2); const w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio); canvas.dataset.pixelRatio = String(ratio); if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } drawMap(); }
+  function resizeCanvas() { const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ratio = Math.min(window.devicePixelRatio || 1, 2); const w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio); canvas.dataset.pixelRatio = String(ratio); if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } if (viewMode === "hybrid") { resizeLeafletMap(); return; } drawMap(); }
+  function ensureLeafletMap() {
+    if (leafletMap || !window.L || !$("leafletMap")) return leafletMap;
+    leafletMap = window.L.map("leafletMap", { zoomControl: true, attributionControl: true, preferCanvas: true, zoomSnap: .25, zoomDelta: .5, minZoom: 9, maxZoom: 19, inertia: true, tap: false });
+    leafletBaseLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles © Esri" });
+    leafletBaseLayer.addTo(leafletMap);
+    leafletMap.on("zoomend moveend", () => { renderLeafletOverlays(); updateZoomUi(); });
+    return leafletMap;
+  }
+  function loadLeafletLibrary() {
+    if (window.L) return Promise.resolve(window.L);
+    if (leafletLibraryPromise) return leafletLibraryPromise;
+    leafletLibraryPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-leaflet-fallback]'); if (existing) { existing.addEventListener("load", () => resolve(window.L), { once: true }); existing.addEventListener("error", reject, { once: true }); return; }
+      const script = document.createElement("script"); script.src = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"; script.crossOrigin = "anonymous"; script.dataset.leafletFallback = "true"; script.onload = () => resolve(window.L); script.onerror = reject; document.head.appendChild(script);
+    });
+    return leafletLibraryPromise;
+  }
+  function resizeLeafletMap() { if (!leafletMap) return; leafletMap.invalidateSize({ pan: false }); renderLeafletOverlays(); }
+  function clearLeafletLayers() { leafletLayers.forEach((layer) => layer.remove()); leafletLayers = []; }
+  function depthLabelIcon(level) { return window.L.divIcon({ className: "depth-label-marker", html: `<span>${escapeHtml(depthText(level))}</span>`, iconSize: [1, 1], iconAnchor: [0, 0] }); }
+  function renderLeafletOverlays() {
+    if (!leafletMap || viewMode !== "hybrid") return;
+    clearLeafletLayers(); const l = lake(); const levels = depthVisible ? (l.contourLevels || []).map(Number).filter(Number.isFinite) : []; const coords = l.geometry.map((p) => [p[0], p[1]]);
+    const boundary = window.L.polygon(coords, { color: "#a5efd0", weight: 2, opacity: .88, fillColor: "#4fb89d", fillOpacity: .16, interactive: false }).addTo(leafletMap); leafletLayers.push(boundary);
+    levels.forEach((level, index) => {
+      const fraction = clamp(.16 + .74 * (level / Math.max(...levels, 1)), .16, .94); const center = l.geometry.reduce((a, p) => [a[0] + p[0] / l.geometry.length, a[1] + p[1] / l.geometry.length], [0, 0]); const ring = l.geometry.map((p) => [center[0] + (p[0] - center[0]) * fraction, center[1] + (p[1] - center[1]) * fraction]);
+      const contour = window.L.polyline(ring, { color: index === levels.length - 1 ? "#b8f5db" : "#d5f4e7", weight: 1, opacity: .58, interactive: false }).addTo(leafletMap); leafletLayers.push(contour);
+      const anchor = ring[Math.floor(ring.length * (.14 + index * .008)) % ring.length]; const marker = window.L.marker(anchor, { icon: depthLabelIcon(level), interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(leafletMap); leafletLayers.push(marker);
+    });
+    if (selectedLake === "sukhodol") { const river = window.L.polyline(window.BURNAYA_PATH.map((p) => [p[0], p[1]]), { color: "#f3d889", weight: 3, dashArray: "7 5", opacity: .9, interactive: false }).addTo(leafletMap); leafletLayers.push(river); }
+    if (zonesVisible) {
+      const ranked = rankedHotspots(settings.fish); const rankById = new Map(ranked.map((item, index) => [item.spot.id, { ...item, rank: index + 1 }]));
+      (l.hotspots || []).forEach((spot) => { const item = rankById.get(spot.id); const rank = item?.rank || 99; const selected = settings.fish !== "universal"; const top = rank <= 3; const marker = window.L.circleMarker([spot.lat, spot.lon], { radius: selected && top ? 9 : 6, color: selected && top ? "#f3d889" : "#e4cd7d", weight: selected && rank === 1 ? 3 : 1.5, fillColor: "#f3d889", fillOpacity: selected && top ? .72 : .35, interactive: true }).addTo(leafletMap); marker.bindTooltip(`${selected ? rank + ". " : ""}${escapeHtml(spot.name)} · ${escapeHtml(spot.depth)}`, { direction: "top", opacity: .92 }); marker.on("click", () => showMapToast(spot.name + " · " + spot.depth + " · " + spot.species + " · шанс " + scoreAt(new Date(), settings.fish, spot))); leafletLayers.push(marker); });
+    }
+  }
+  function syncMapSurface() {
+    const canvas = $("lakeCanvas"); const surface = $("leafletMap"); const hybrid = viewMode === "hybrid";
+    canvas.hidden = hybrid; surface.hidden = !hybrid;
+    if (hybrid) { const map = ensureLeafletMap(); if (!map) { loadLeafletLibrary().then(() => { if (viewMode === "hybrid") syncMapSurface(); }).catch(() => { canvas.hidden = false; surface.hidden = true; showToast("Гибридный слой недоступен — показываю офлайн-карту", 2600); drawMap(); }); return; } const l = lake(); const bounds = window.L.latLngBounds(l.geometry.map((p) => [p[0], p[1]])); const sameLake = map._klevLakeKey === selectedLake; map._klevLakeKey = selectedLake; if (!sameLake) map.fitBounds(bounds.pad(.08), { animate: false }); setTimeout(() => { map.invalidateSize({ pan: false }); renderLeafletOverlays(); updateZoomUi(); }, 0); }
+    else { drawMap(); }
+  }
   function drawMap() {
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; constrainMapPan(w, h); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
     drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34)); drawLand(ctx,w,h,bounds);
@@ -571,14 +626,13 @@
   }
   function drawDepthLabels(ctx, points, tilted = false, width, height) {
     const contours = depthContours(points); if (!contours.length) return;
-    const center = depthCenter(points); const fontSize = clamp((width || 360) / 70, 10, 14); const mapWidth = width || 360; const mapHeight = height || 280;
-    ctx.save(); ctx.font = `600 ${fontSize.toFixed(1)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const center = depthCenter(points); const fontSize = clamp((width || 360) / 105, 7, 9.5); const mapWidth = width || 360; const mapHeight = height || 280;
+    ctx.save(); ctx.font = `500 ${fontSize.toFixed(1)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     contours.forEach((contour, index) => {
-      // Every pill is anchored to a point on its own contour. A short leader
-      // makes the relationship obvious even when several rings are close.
-      const anchor = pointOnPolygon(contour.ring, .14 + index * .008); const vx = anchor.x - center.x; const vy = anchor.y - center.y; const distance = Math.hypot(vx, vy) || 1; const offset = clamp(fontSize * .85, 7, 11); const label = depthText(contour.level); const textWidth = ctx.measureText(label).width; const boxWidth = textWidth + 10; const boxHeight = fontSize + 8;
-      const x = clamp(anchor.x + vx / distance * offset, boxWidth / 2 + 4, mapWidth - boxWidth / 2 - 4); const y = clamp(anchor.y + vy / distance * offset, boxHeight / 2 + 4, mapHeight - boxHeight / 2 - 4);
-      ctx.save(); ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.lineTo(x, y); ctx.strokeStyle = index === contours.length - 1 ? "rgba(159,231,199,.95)" : "rgba(220,250,237,.65)"; ctx.lineWidth = 1.1; ctx.stroke(); ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 2.1, 0, Math.PI * 2); ctx.fillStyle = index === contours.length - 1 ? "#9fe7c7" : "#d9f8ec"; ctx.fill(); ctx.shadowColor = "rgba(0,0,0,.38)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1; roundedRectPath(ctx, x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 4); ctx.fillStyle = "rgba(3,18,23,.88)"; ctx.fill(); ctx.shadowColor = "transparent"; ctx.strokeStyle = index === contours.length - 1 ? "rgba(159,231,199,.95)" : "rgba(220,250,237,.58)"; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = "#effff7"; ctx.fillText(label, x, y + .5); ctx.restore();
+      // Quiet, background-free label anchored to the matching contour.
+      const anchor = pointOnPolygon(contour.ring, .14 + index * .008); const vx = anchor.x - center.x; const vy = anchor.y - center.y; const distance = Math.hypot(vx, vy) || 1; const offset = clamp(fontSize * .45, 2, 4); const label = depthText(contour.level);
+      const x = clamp(anchor.x + vx / distance * offset, 8, mapWidth - 8); const y = clamp(anchor.y + vy / distance * offset, 7, mapHeight - 7);
+      ctx.save(); ctx.fillStyle = index === contours.length - 1 ? "rgba(225,250,239,.78)" : "rgba(225,245,237,.62)"; ctx.fillText(label, x, y + .2); ctx.restore();
     });
     ctx.restore();
   }
@@ -636,9 +690,9 @@
   function nearestHotspot(lat,lon,w,h,bounds) { let best=null,bestPx=Infinity; lake().hotspots.forEach((spot)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34); const q=projectPoint(lat,lon,w,h,bounds,34); const d=Math.hypot(p.x-q.x,p.y-q.y); if(d<bestPx){bestPx=d;best=spot;}}); return bestPx<Math.max(24,w*.07) ? best : null; }
   let mapToastTimer=null;
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
-  function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude};drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
+  function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude}; if (viewMode === "hybrid" && leafletMap) leafletMap.setView([pos.coords.latitude, pos.coords.longitude], Math.max(leafletMap.getZoom(), 14), { animate: true }); else drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260831-fish-map-2", { updateViaCache: "none" }).catch(()=>{});} }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260901-hybrid-calm-4", { updateViaCache: "none" }).catch(()=>{});} }
   function boot() { setupNavigation(); $("fishSelect").value=settings.fish; navigate(location.hash.slice(1)||"map",false); setConnection(isOnline()?"online":"offline",isOnline()?"онлайн":"локально"); renderSources(); renderAll(); fetchWeather(false); registerServiceWorker(); }
   document.addEventListener("DOMContentLoaded", boot);
 })();

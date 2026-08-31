@@ -106,6 +106,18 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 .tool-button span { font-size: 14px; }
 .canvas-wrap { position: relative; aspect-ratio: 1.72; min-height: 280px; overflow: hidden; background: #0a262c; overscroll-behavior: contain; }
 #lakeCanvas { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.leaflet-map { position: absolute; inset: 0; z-index: 1; background: #d6e5df; }
+.leaflet-map[hidden] { display: none; }
+.leaflet-map .leaflet-control-zoom { margin-top: 74px; margin-right: 10px; border: 0; box-shadow: 0 5px 16px rgba(3,18,23,.22); }
+.leaflet-map .leaflet-control-zoom a { width: 30px; height: 30px; line-height: 28px; background: rgba(7,24,29,.88); color: var(--ink); border-color: rgba(177,224,211,.2); }
+.leaflet-map .leaflet-control-zoom a:hover { background: #173b42; color: var(--mint); }
+.leaflet-map .leaflet-control-attribution { background: rgba(7,24,29,.68); color: rgba(236,248,244,.76); font-size: 8px; }
+.leaflet-map .leaflet-control-attribution a { color: var(--mint); }
+.leaflet-map .leaflet-marker-icon.depth-label-marker { width: auto !important; height: auto !important; margin: 0 !important; }
+.depth-label-marker span { display: block; color: rgba(235,255,247,.72); font: 500 9px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,.65), 0 0 2px rgba(0,0,0,.55); transform: translate(-50%, -50%); pointer-events: none; }
+.leaflet-map .leaflet-tile-pane { filter: saturate(.86) contrast(.96) brightness(.92); }
+.leaflet-map .leaflet-overlay-pane svg { overflow: visible; }
+.leaflet-map .leaflet-overlay-pane path { vector-effect: non-scaling-stroke; }
 .map-floating { position: absolute; left: 13px; right: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; color: rgba(236,248,244,.74); font-size: 10px; text-shadow: 0 1px 4px rgba(0,0,0,.4); }
 .map-floating-top { top: 12px; } .map-floating-bottom { bottom: 11px; }
 .map-floating-top { justify-content: flex-start; } .map-floating-top > span:nth-child(2) { margin-left: auto; color: var(--yellow); font-size: 9px; }
@@ -339,7 +351,7 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 @media (max-width: 450px) {
   h1 { font-size: 37px; }
   .lake-picker { gap: 5px; } .lake-tab { min-height: 61px; padding: 8px 7px; gap: 6px; } .lake-tab small { font-size: 9px; } .lake-tab b { font-size: 14px; }
-  .canvas-wrap { aspect-ratio: 1.25; min-height: 260px; }
+  .canvas-wrap { aspect-ratio: 1.05; min-height: 330px; }
   .legend { gap: 5px 8px; } .legend span { font-size: 8px; }
   .map-footer { align-items: stretch; flex-direction: column; }
   .map-footer-main { width: 100%; }
