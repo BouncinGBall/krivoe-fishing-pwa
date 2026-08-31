@@ -94,6 +94,9 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 
 .map-card { overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: linear-gradient(150deg, rgba(16,47,54,.96), rgba(7,24,29,.96)); box-shadow: var(--shadow); }
 .map-toolbar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.map-fish-select { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.map-fish-select span { color: var(--muted-2); }
+.map-fish-select select { max-width: 132px; min-height: 30px; padding: 0 24px 0 8px; border: 1px solid rgba(177,224,211,.2); border-radius: 8px; background: rgba(2,13,16,.42); color: var(--mint); font-size: 10px; }
 .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: rgba(2,13,16,.36); }
 .segmented button { min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; }
 .segmented button.is-active { background: rgba(159,231,199,.14); color: var(--mint); }
@@ -105,6 +108,7 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 #lakeCanvas { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .map-floating { position: absolute; left: 13px; right: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; color: rgba(236,248,244,.74); font-size: 10px; text-shadow: 0 1px 4px rgba(0,0,0,.4); }
 .map-floating-top { top: 12px; } .map-floating-bottom { bottom: 11px; }
+.map-floating-top { justify-content: flex-start; } .map-floating-top > span:nth-child(2) { margin-left: auto; color: var(--yellow); font-size: 9px; }
 .north-arrow { display: inline-flex; gap: 5px; align-items: center; color: var(--mint); font-weight: 600; } .north-arrow i { font-size: 18px; font-style: normal; line-height: 1; }
 .map-zoom { position: absolute; z-index: 2; top: 39px; right: 13px; display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid rgba(177,224,211,.2); border-radius: 10px; background: rgba(6,24,29,.78); box-shadow: 0 8px 22px rgba(0,0,0,.2); pointer-events: auto; }
 .map-zoom button { width: 30px; height: 29px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 18px; line-height: 1; }
@@ -121,6 +125,22 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 .depth-scale-chip { display: inline-flex; align-items: center; min-height: 23px; padding: 0 7px; border: 1px solid rgba(177,224,211,.2); border-radius: 7px; background: rgba(35,104,123,.3); color: #e7fff5; font-size: 10px; font-variant-numeric: tabular-nums; }
 .depth-scale-chip.is-deep { border-color: rgba(159,231,199,.45); background: rgba(23,76,96,.62); color: var(--mint); }
 .depth-strip p { margin: 0; color: var(--muted-2); font-size: 9px; line-height: 1.35; }
+.fish-map-strip { display: grid; gap: 7px; padding: 10px 12px 11px; border-top: 1px solid rgba(243,216,137,.16); background: linear-gradient(180deg, rgba(50,39,17,.16), rgba(4,20,25,.42)); }
+.fish-map-strip-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+.fish-map-strip-head > span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; }
+.fish-map-mark { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid rgba(243,216,137,.58); border-radius: 6px; color: var(--yellow); font-style: normal; }
+.fish-map-strip-head strong { color: var(--yellow); font-size: 10px; font-weight: 600; }
+.fish-map-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.fish-map-point { min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 6px; padding: 8px; border: 1px solid rgba(243,216,137,.2); border-radius: 8px; background: rgba(7,24,29,.48); color: var(--ink); text-align: left; }
+.fish-map-point.is-best { border-color: rgba(243,216,137,.62); background: rgba(243,216,137,.09); }
+.fish-map-point:hover, .fish-map-point:focus-visible { border-color: rgba(243,216,137,.85); }
+.fish-map-rank { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 5px; background: rgba(243,216,137,.18); color: var(--yellow); font-size: 10px; font-weight: 700; }
+.fish-map-point-main { min-width: 0; }
+.fish-map-point-main strong, .fish-map-point-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fish-map-point-main strong { font-size: 10px; font-weight: 600; }
+.fish-map-point-main small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.fish-map-point > b { color: var(--yellow); font-size: 14px; font-weight: 600; }
+.fish-map-strip > p { margin: 0; color: var(--muted-2); font-size: 9px; line-height: 1.35; }
 .map-footer { min-height: 51px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); }
 .map-footer-main { min-width: 0; display: grid; gap: 5px; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 12px; color: var(--muted); font-size: 9px; }
@@ -302,6 +322,8 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
   .score-ring { width: 88px; height: 88px; } .score-ring::before { width: 68px; height: 68px; } .score-ring strong { font-size: 26px; }
   .score-copy { max-width: 210px; }
   .map-toolbar { align-items: flex-start; flex-direction: column; }
+  .map-fish-select { width: 100%; justify-content: space-between; }
+  .map-fish-select select { flex: 1; max-width: none; }
   .toolbar-actions { width: 100%; justify-content: space-between; }
   .tool-button { flex: 1; justify-content: center; }
   .quick-grid { grid-template-columns: 1fr 1fr; }
@@ -330,6 +352,9 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
   .form-row { grid-template-columns: 1fr; }
   .about-footer { align-items: flex-start; flex-direction: column; }
   .depth-strip { padding-right: 10px; padding-left: 10px; }
+  .fish-map-strip { padding-right: 10px; padding-left: 10px; }
+  .fish-map-points { grid-template-columns: 1fr; }
+  .fish-map-point { grid-template-columns: auto minmax(0,1fr) auto; }
   .depth-strip-head { align-items: flex-start; flex-direction: column; gap: 5px; }
   .depth-scale-chips { gap: 4px; }
   .depth-scale-chip { min-height: 22px; padding: 0 6px; font-size: 9px; }

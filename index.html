@@ -59,6 +59,7 @@
               <button id="mode2d" class="is-active" type="button" aria-pressed="true">2D карта</button>
               <button id="mode3d" type="button" aria-pressed="false">3D рельеф</button>
             </div>
+            <label class="map-fish-select" for="mapFishSelect"><span>Рыба на карте</span><select id="mapFishSelect" aria-label="Выбрать рыбу для точек на карте"><option value="universal">все виды</option></select></label>
             <div class="toolbar-actions">
               <button id="depthToggle" class="tool-button is-active" type="button" aria-pressed="true"><span>◒</span> глубины</button>
               <button id="zonesToggle" class="tool-button is-active" type="button" aria-pressed="true"><span>⌖</span> зоны</button>
@@ -67,7 +68,7 @@
           </div>
           <div class="canvas-wrap">
             <canvas id="lakeCanvas" width="900" height="560" role="img" aria-label="Интерактивная модельная карта глубин"></canvas>
-            <div class="map-floating map-floating-top"><span id="mapModeLabel">2D · модельная батиметрия</span><span class="north-arrow" aria-label="Север">N <i>↑</i></span></div>
+            <div class="map-floating map-floating-top"><span id="mapModeLabel">2D · модельная батиметрия</span><span id="mapFishLabel" class="map-fish-label">рыба: все виды</span><span class="north-arrow" aria-label="Север">N <i>↑</i></span></div>
             <div class="map-floating map-floating-bottom"><span id="mapHint">Нажмите на карту, чтобы поставить точку</span><span id="mapScale">—</span></div>
             <div class="map-zoom" role="group" aria-label="Масштаб карты">
               <button id="zoomOut" type="button" aria-label="Уменьшить масштаб">−</button>
@@ -80,6 +81,11 @@
             <div class="depth-strip-head"><span><i class="depth-strip-mark"></i>Разметка глубин</span><span id="depthConfidenceChip" class="confidence-chip">уверенность —</span></div>
             <div id="depthScaleChips" class="depth-scale-chips"></div>
             <p id="depthScaleNote">Проверяю опубликованную схему…</p>
+          </div>
+          <div id="fishMapStrip" class="fish-map-strip" aria-live="polite" aria-label="Лучшие точки для выбранной рыбы">
+            <div class="fish-map-strip-head"><span><i class="fish-map-mark">⌖</i><span id="fishMapTitle">Точки на карте</span></span><strong id="fishMapTarget">все виды</strong></div>
+            <div id="fishMapPoints" class="fish-map-points"></div>
+            <p id="fishMapNote">Выберите рыбу в прогнозе или в полевом справочнике — маркеры на карте перестроятся.</p>
           </div>
           <div class="map-footer">
             <div class="map-footer-main"><div class="legend"><span><i class="legend-deep"></i>глубже</span><span><i class="legend-shallow"></i>мельче</span><span><i class="legend-zone"></i>перспективная зона</span></div><small class="map-attribution">Контуры: © OpenStreetMap contributors</small></div>

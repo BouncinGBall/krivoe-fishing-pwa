@@ -64,6 +64,7 @@
     qsa(".lake-tab").forEach((button) => button.addEventListener("click", () => selectLake(button.dataset.lake)));
     $("mode2d").addEventListener("click", () => setMode("2d"));
     $("mode3d").addEventListener("click", () => setMode("3d"));
+    $("mapFishSelect").addEventListener("change", (event) => { settings.fish = event.target.value; writeJson(SETTINGS_KEY, settings); renderAll(); showToast("На карте: " + fishLabel(settings.fish), 1600); });
     $("depthToggle").addEventListener("click", () => { depthVisible = !depthVisible; updateToggle($("depthToggle"), depthVisible); drawMap(); });
     $("zonesToggle").addEventListener("click", () => { zonesVisible = !zonesVisible; updateToggle($("zonesToggle"), zonesVisible); drawMap(); });
     $("locateButton").addEventListener("click", locateUser);
@@ -279,8 +280,9 @@
     $("currentWeather").textContent = fmt(c.temperature, 0) + "° · " + weatherIcon(c.code, c.isDay);
     $("currentWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа · " + weatherCodeText(c.code);
     $("depthSummary").textContent = l.depthLabel; $("depthMeta").textContent = l.depthSource + " · " + l.depthConfidence.toLowerCase();
-    renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
+    renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderFishMapGuide(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas();
     $("fishSelect").value = settings.fish;
+    const mapFishSelect = $("mapFishSelect"); if (mapFishSelect) { mapFishSelect.value = settings.fish; }
   }
 
   function depthText(value) {
@@ -288,7 +290,7 @@
     return Number.isFinite(n) ? n.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) + " м" : "—";
   }
   function renderMapMeta() {
-    const l = lake(); const center = l.center; $("mapHint").textContent = viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб"; $("mapScale").textContent = l.area + " · " + l.depthLabel; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
+    const l = lake(); const center = l.center; const target = fishLabel(settings.fish); $("mapHint").textContent = (viewMode === "3d" ? "Перетащите · двумя пальцами — наклон и масштаб" : "Перетащите карту · двумя пальцами — масштаб") + " · точки: " + target; $("mapFishLabel").textContent = "рыба: " + target; $("mapScale").textContent = l.area + " · " + l.depthLabel; $("copyCoordinates").textContent = "коорд.: " + Number(center[0]).toFixed(6) + ", " + Number(center[1]).toFixed(6); updateZoomUi();
   }
   function renderDepthScale() {
     const l = lake(); const levels = Array.isArray(l.contourLevels) ? l.contourLevels : [];
@@ -306,6 +308,30 @@
       const rows = evidence.map((item) => `<div class="depth-evidence-row ${item.excluded ? "is-excluded" : ""}"><strong>${escapeHtml(item.source || "Источник")}</strong><span class="depth-evidence-value">${escapeHtml(item.value || "—")}</span><small>${escapeHtml(item.type || "")} · ${escapeHtml(item.note || "")}</small><a href="${escapeHtml(item.href || "#")}" target="_blank" rel="noreferrer" aria-label="Открыть источник: ${escapeHtml(item.source || "")}">↗</a></div>`).join("");
       return `<article class="depth-audit-card"><div class="depth-audit-card-head"><div><strong>${escapeHtml(l.name)}</strong><div class="depth-audit-claim">${escapeHtml(l.depthLabel)}</div></div><span class="depth-audit-status ${statusClass}">${escapeHtml(l.depthConfidence || "нет оценки")}</span></div><div class="depth-audit-evidence">${rows || "<small>Нет опубликованного числового подтверждения.</small>"}</div><p class="depth-audit-note">${escapeHtml(l.depthNote || "Глубина ориентировочная; проверьте промером.")}</p></article>`;
     }).join("");
+  }
+  function rankedHotspots(kind = settings.fish) {
+    const target = kind || "universal";
+    return (lake().hotspots || []).map((spot) => ({ spot, score: scoreAt(new Date(), target, spot) })).sort((a, b) => b.score - a.score);
+  }
+  function renderFishMapGuide() {
+    const target = settings.fish || "universal"; const label = fishLabel(target); const ranked = rankedHotspots(target); const points = $("fishMapPoints"); const title = $("fishMapTitle"); const targetEl = $("fishMapTarget"); const note = $("fishMapNote"); const mapSelect = $("mapFishSelect");
+    if (!points || !title || !targetEl || !note) return;
+    if (mapSelect) {
+      const available = new Set(["universal", ...(lake().fishKinds || [])]);
+      mapSelect.innerHTML = ["universal", ...(lake().fishKinds || [])].filter((kind, index, arr) => available.has(kind) && arr.indexOf(kind) === index).map((kind) => `<option value="${escapeHtml(kind)}">${escapeHtml(fishLabel(kind))}</option>`).join("");
+      mapSelect.value = available.has(target) ? target : "universal";
+    }
+    title.textContent = target === "universal" ? "Перспективные точки" : "Лучшие точки на карте";
+    targetEl.textContent = label;
+    points.innerHTML = ranked.slice(0, 3).map((item, index) => `<button type="button" class="fish-map-point ${index === 0 ? "is-best" : ""}" data-hotspot-id="${escapeHtml(item.spot.id)}"><span class="fish-map-rank">${index + 1}</span><span class="fish-map-point-main"><strong>${escapeHtml(item.spot.name)}</strong><small>${escapeHtml(item.spot.depth)} · ${escapeHtml(item.spot.species)}</small></span><b>${item.score}</b></button>`).join("");
+    note.textContent = target === "universal" ? "Показаны три стартовые зоны; выберите вид рыбы, чтобы пересчитать рейтинг." : "Золотые маркеры на карте — три лучшие зоны для выбранной рыбы. Рейтинг ориентировочный.";
+    qsa("[data-hotspot-id]").forEach((button) => button.addEventListener("click", () => focusHotspot(button.dataset.hotspotId)));
+  }
+  function focusHotspot(id) {
+    const spot = (lake().hotspots || []).find((item) => item.id === id); if (!spot) return;
+    const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return;
+    const bounds = mapBounds(); const p = projectPoint(spot.lat, spot.lon, canvas.clientWidth, canvas.clientHeight, bounds, 34); const cx = canvas.clientWidth / 2; const cy = canvas.clientHeight / 2;
+    mapState.scale = Math.max(mapState.scale, 1.65); mapState.panX = cx - (cx + (p.x - cx) * mapState.scale); mapState.panY = cy - (cy + (p.y - cy) * mapState.scale); constrainMapPan(canvas.clientWidth, canvas.clientHeight); drawMap(); showMapToast(spot.name + " · " + spot.depth + " · " + fishLabel(settings.fish), 2600);
   }
   function renderBestWindow() {
     const windows = bestWindows(3); const first = windows[0];
@@ -513,43 +539,61 @@
   function drawTerrainShadow(ctx,points,w,h) { ctx.save(); ctx.globalAlpha = .28; for (let i = 8; i >= 1; i--) { pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + i * 4 }))); ctx.fillStyle = `rgba(0,10,15,${.035 + i * .012})`; ctx.fill(); } ctx.globalAlpha = .5; pathPolygon(ctx, points.map((p) => ({ x: p.x, y: p.y + 34 }))); ctx.strokeStyle = "rgba(1,13,18,.65)"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
   function drawWater(ctx,points,tilted) { pathPolygon(ctx,points); const g=ctx.createLinearGradient(0,0,0,ctx.canvas.height); g.addColorStop(0, tilted ? "rgba(136,211,220,.78)" : "rgba(72,153,171,.62)");g.addColorStop(.42, tilted ? "rgba(49,128,151,.78)" : "rgba(39,116,139,.67)");g.addColorStop(1,"rgba(12,54,76,.88)");ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=tilted ? "rgba(203,249,232,.92)" : "rgba(159,231,199,.78)";ctx.lineWidth=tilted ? 2.4 : 2;ctx.stroke(); if(tilted){ctx.save();ctx.globalAlpha=.32;pathPolygon(ctx,points.map((p)=>({x:p.x,y:p.y-2})));ctx.strokeStyle="#e3fff4";ctx.lineWidth=1;ctx.stroke();ctx.restore();} }
   function depthCenter(points) { return points.reduce((a,p) => ({ x: a.x + p.x / points.length, y: a.y + p.y / points.length }), { x: 0, y: 0 }); }
-  function drawDepthBands(ctx, points, tilted = false, width, height) {
-    if (!Array.isArray(points) || points.length < 3) return;
-    const levels = (lake().contourLevels || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
-    if (!levels.length) return;
+  function depthContours(points) {
+    if (!Array.isArray(points) || points.length < 3) return [];
+    const levels = (lake().contourLevels || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b); if (!levels.length) return [];
     const center = depthCenter(points); const max = Math.max(...levels, 1);
-    levels.slice().reverse().forEach((level, index) => {
+    return levels.map((level) => {
       const t = clamp(level / max, 0, 1); const f = clamp(.16 + .74 * t, .16, .94);
-      const ring = points.map((p) => ({ x: center.x + (p.x - center.x) * f, y: center.y + (p.y - center.y) * f }));
-      pathPolygon(ctx, ring);
-      const alpha = (tilted ? .12 : .075) + t * (tilted ? .11 : .075);
-      ctx.fillStyle = `rgba(${Math.round(54 - t * 27)},${Math.round(137 - t * 43)},${Math.round(159 + t * 20)},${alpha.toFixed(3)})`;
+      return { level, t, ring: points.map((p) => ({ x: center.x + (p.x - center.x) * f, y: center.y + (p.y - center.y) * f })) };
+    });
+  }
+  function drawDepthBands(ctx, points, tilted = false) {
+    const contours = depthContours(points); if (!contours.length) return;
+    contours.slice().reverse().forEach((contour) => {
+      pathPolygon(ctx, contour.ring);
+      const alpha = (tilted ? .12 : .075) + contour.t * (tilted ? .11 : .075);
+      ctx.fillStyle = `rgba(${Math.round(54 - contour.t * 27)},${Math.round(137 - contour.t * 43)},${Math.round(159 + contour.t * 20)},${alpha.toFixed(3)})`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(210,250,235,${((tilted ? .24 : .16) + t * .2).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(210,250,235,${((tilted ? .24 : .16) + contour.t * .2).toFixed(3)})`;
       ctx.lineWidth = tilted ? 1.35 : 1.1; ctx.stroke();
     });
   }
   function roundedRectPath(ctx, x, y, width, height, radius) {
     const r = Math.min(radius, width / 2, height / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + width - r, y); ctx.quadraticCurveTo(x + width, y, x + width, y + r); ctx.lineTo(x + width, y + height - r); ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height); ctx.lineTo(x + r, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
   }
+  function pointOnPolygon(ring, fraction) {
+    if (!ring?.length) return { x: 0, y: 0 };
+    let total = 0; const lengths = ring.map((p, i) => { const q = ring[(i + 1) % ring.length]; const len = Math.hypot(q.x - p.x, q.y - p.y); total += len; return len; });
+    let target = ((fraction % 1) + 1) % 1 * total;
+    for (let i = 0; i < ring.length; i++) { const p = ring[i]; const q = ring[(i + 1) % ring.length]; const len = lengths[i] || 1; if (target <= len) { const k = target / len; return { x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k }; } target -= len; }
+    return ring[0];
+  }
   function drawDepthLabels(ctx, points, tilted = false, width, height) {
-    if (!Array.isArray(points) || points.length < 3) return;
-    const levels = (lake().contourLevels || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b); if (!levels.length) return;
-    const center = depthCenter(points); const max = Math.max(...levels, 1);
-    const radiusX = Math.max(...points.map((p) => Math.abs(p.x - center.x)), 1); const radiusY = Math.max(...points.map((p) => Math.abs(p.y - center.y)), 1);
-    const angles = [-.92, .06, 1.02, 2.02, 2.92, -.2, .62, 2.48];
-    const fontSize = clamp((width || 360) / 62, 11, 15); const safeTop = tilted ? 24 : 16; const safeBottom = tilted ? (height || 280) - 26 : (height || 280) - 16;
+    const contours = depthContours(points); if (!contours.length) return;
+    const center = depthCenter(points); const fontSize = clamp((width || 360) / 70, 10, 14); const mapWidth = width || 360; const mapHeight = height || 280;
     ctx.save(); ctx.font = `600 ${fontSize.toFixed(1)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    levels.forEach((level, index) => {
-      const t = clamp(level / max, 0, 1); const angle = angles[index % angles.length]; const x0 = center.x + Math.cos(angle) * radiusX * (.3 + t * .48); const y0 = center.y + Math.sin(angle) * radiusY * (.3 + t * .48); const label = depthText(level); const textWidth = ctx.measureText(label).width; const boxWidth = textWidth + 12; const boxHeight = fontSize + 9;
-      const x = clamp(x0, boxWidth / 2 + 5, (width || 360) - boxWidth / 2 - 5); const y = clamp(y0, safeTop + boxHeight / 2, safeBottom - boxHeight / 2);
-      ctx.save(); ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = 5; ctx.shadowOffsetY = 1; roundedRectPath(ctx, x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 5); ctx.fillStyle = "rgba(3,18,23,.84)"; ctx.fill(); ctx.shadowColor = "transparent"; ctx.strokeStyle = index === levels.length - 1 ? "rgba(159,231,199,.9)" : "rgba(220,250,237,.6)"; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = "#effff7"; ctx.fillText(label, x, y + .5); ctx.restore();
+    contours.forEach((contour, index) => {
+      // Every pill is anchored to a point on its own contour. A short leader
+      // makes the relationship obvious even when several rings are close.
+      const anchor = pointOnPolygon(contour.ring, .14 + index * .008); const vx = anchor.x - center.x; const vy = anchor.y - center.y; const distance = Math.hypot(vx, vy) || 1; const offset = clamp(fontSize * .85, 7, 11); const label = depthText(contour.level); const textWidth = ctx.measureText(label).width; const boxWidth = textWidth + 10; const boxHeight = fontSize + 8;
+      const x = clamp(anchor.x + vx / distance * offset, boxWidth / 2 + 4, mapWidth - boxWidth / 2 - 4); const y = clamp(anchor.y + vy / distance * offset, boxHeight / 2 + 4, mapHeight - boxHeight / 2 - 4);
+      ctx.save(); ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.lineTo(x, y); ctx.strokeStyle = index === contours.length - 1 ? "rgba(159,231,199,.95)" : "rgba(220,250,237,.65)"; ctx.lineWidth = 1.1; ctx.stroke(); ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 2.1, 0, Math.PI * 2); ctx.fillStyle = index === contours.length - 1 ? "#9fe7c7" : "#d9f8ec"; ctx.fill(); ctx.shadowColor = "rgba(0,0,0,.38)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1; roundedRectPath(ctx, x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 4); ctx.fillStyle = "rgba(3,18,23,.88)"; ctx.fill(); ctx.shadowColor = "transparent"; ctx.strokeStyle = index === contours.length - 1 ? "rgba(159,231,199,.95)" : "rgba(220,250,237,.58)"; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = "#effff7"; ctx.fillText(label, x, y + .5); ctx.restore();
     });
     ctx.restore();
   }
   function drawTerrainGrid(ctx,w,h,points) { ctx.save();ctx.globalAlpha=.32;ctx.strokeStyle="#d0f5e9";ctx.lineWidth=1;const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y)); for(let i=0;i<9;i++){const y=minY+(maxY-minY)*i/8;ctx.beginPath();ctx.moveTo(minX-20,y);ctx.lineTo(maxX+20,y-42-i*2);ctx.stroke();} for(let i=0;i<11;i++){const x=minX+(maxX-minX)*i/10;ctx.beginPath();ctx.moveTo(x,minY-8);ctx.lineTo(x-42,maxY+8);ctx.stroke();} ctx.globalAlpha=.24; ctx.strokeStyle="#0a3245"; for(let i=0;i<5;i++){const y=minY+(maxY-minY)*(.14+i*.18);ctx.beginPath();ctx.moveTo(minX,y);ctx.quadraticCurveTo((minX+maxX)/2,y-18,maxX,y-34);ctx.stroke();}ctx.restore(); }
   function drawRiver(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const path=window.BURNAYA_PATH.map((p)=>projectPoint(p[0],p[1],w,h,bounds,34)); ctx.save();ctx.strokeStyle="#f3d889";ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([7,5]);ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#f3d889";ctx.font="11px -apple-system, sans-serif";const mid=path[Math.floor(path.length/2)];ctx.fillText("р. Бурная · проверьте правила",mid.x+8,mid.y-8);ctx.restore(); }
-  function drawHotspots(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; ctx.save(); lake().hotspots.forEach((spot,i)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34);const r=Math.max(16,w/48);const score=scoreAt(new Date(),settings.fish,spot);ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fillStyle="rgba(243,216,137,.15)";ctx.fill();ctx.strokeStyle="rgba(243,216,137,.65)";ctx.setLineDash([3,3]);ctx.lineWidth=1.3;ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fillStyle="#f3d889";ctx.fill(); if(i===0 || w>650){ctx.font="11px -apple-system, sans-serif";ctx.fillStyle="rgba(236,248,244,.9)";ctx.textAlign="left";ctx.fillText(spot.name+" · "+score,p.x+r+4,p.y+4);}});ctx.restore(); }
+  function drawHotspots(ctx,bounds) {
+    const w = ctx.canvas.clientWidth || ctx.canvas.width, h = ctx.canvas.clientHeight || ctx.canvas.height; const ranked = rankedHotspots(settings.fish); const rankById = new Map(ranked.map((item, index) => [item.spot.id, { ...item, rank: index + 1 }]));
+    ctx.save(); (lake().hotspots || []).forEach((spot) => {
+      const item = rankById.get(spot.id); const p = projectPoint(spot.lat, spot.lon, w, h, bounds, 34); const rank = item?.rank || 99; const score = item?.score || scoreAt(new Date(), settings.fish, spot); const selected = settings.fish !== "universal"; const isTop = rank <= 3; const r = Math.max(selected ? (isTop ? 22 : 14) : 16, w / (selected && isTop ? 42 : 52));
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fillStyle = selected && isTop ? (rank === 1 ? "rgba(243,216,137,.3)" : "rgba(243,216,137,.17)") : "rgba(243,216,137,.12)"; ctx.fill(); ctx.strokeStyle = selected && isTop ? "rgba(243,216,137,.95)" : "rgba(243,216,137,.48)"; ctx.setLineDash(selected && isTop ? [] : [3, 3]); ctx.lineWidth = selected && rank === 1 ? 2.2 : 1.2; ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, selected && isTop ? 6 : 4, 0, Math.PI * 2); ctx.fillStyle = selected && rank === 1 ? "#fff0a8" : "#f3d889"; ctx.fill();
+      if (selected && isTop) { ctx.font = `700 ${Math.max(10, Math.min(13, w / 75)).toFixed(1)}px -apple-system, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#07181d"; ctx.fillText(String(rank), p.x, p.y + .5); }
+      if (selected ? isTop : (rank === 1 || w > 650)) { const label = selected ? `${rank}. ${spot.name} · ${score}` : `${spot.name} · ${score}`; ctx.font = "600 10px -apple-system, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; const lx = clamp(p.x + r + 5, 6, w - Math.min(185, w * .48)); const ly = clamp(p.y, 15, h - 15); const tw = ctx.measureText(label).width + 10; roundedRectPath(ctx, lx - 4, ly - 9, tw, 18, 4); ctx.fillStyle = "rgba(3,18,23,.86)"; ctx.fill(); ctx.fillStyle = "#effff7"; ctx.fillText(label, lx + 1, ly + .5); }
+    }); ctx.restore();
+  }
   function drawUser(ctx,p) { ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,10,0,Math.PI*2);ctx.fillStyle="#65cfe0";ctx.fill();ctx.strokeStyle="#e9ffff";ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(p.x,p.y,18,0,Math.PI*2);ctx.strokeStyle="rgba(101,207,224,.45)";ctx.lineWidth=2;ctx.stroke();ctx.restore(); }
   function drawJournalPoints(ctx,w,h,bounds) { const entries=journal.filter((entry)=>entry.lake===selectedLake); if(!entries.length)return; ctx.save(); entries.forEach((entry)=>{const p=projectPoint(entry.lat,entry.lon,w,h,bounds,34);ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle=entry.type==="catch"?"#f17973":"#65cfe0";ctx.fill();ctx.strokeStyle="#07181d";ctx.lineWidth=2;ctx.stroke();}); ctx.restore(); }
   function estimateDepth(lat,lon) { const c=lake().focus || lake().center; const dx=(lon-c[1])*111320*Math.cos(c[0]*Math.PI/180),dy=(lat-c[0])*111320; const d=Math.sqrt(dx*dx+dy*dy); const max=lake().maxDepth; return clamp(max*(.18+.82*(1-Math.min(1,d/1200))), .7, max); }
