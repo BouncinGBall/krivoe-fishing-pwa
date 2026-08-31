@@ -1,5 +1,5 @@
-const CACHE_NAME = "klev-ryadom-v6-depth-audit";
-const ASSET_VERSION = "20260831-depth-audit-1";
+const CACHE_NAME = "klev-ryadom-v7-fish-map";
+const ASSET_VERSION = "20260831-fish-map-2";
 const APP_SHELL = [
   "./",
   "./index.html",

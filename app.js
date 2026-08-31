@@ -638,7 +638,7 @@
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
   function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude};drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260831-depth-audit-1", { updateViaCache: "none" }).catch(()=>{});} }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260831-fish-map-2", { updateViaCache: "none" }).catch(()=>{});} }
   function boot() { setupNavigation(); $("fishSelect").value=settings.fish; navigate(location.hash.slice(1)||"map",false); setConnection(isOnline()?"online":"offline",isOnline()?"онлайн":"локально"); renderSources(); renderAll(); fetchWeather(false); registerServiceWorker(); }
   document.addEventListener("DOMContentLoaded", boot);
 })();
