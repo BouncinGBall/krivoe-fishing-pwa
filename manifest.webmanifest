@@ -1,0 +1,21 @@
+{
+  "name": "Клёв рядом — карты озёр",
+  "short_name": "Клёв рядом",
+  "id": "./",
+  "description": "Офлайн-карта, модельные глубины и прозрачный прогноз клёва для озёр Приозерского района.",
+  "lang": "ru",
+  "start_url": "./index.html#map",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07181d",
+  "theme_color": "#071b22",
+  "prefer_related_applications": false,
+  "categories": ["sports", "weather", "navigation"],
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
