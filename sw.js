@@ -1,5 +1,5 @@
-const CACHE_NAME = "klev-ryadom-v10-mednoe";
-const ASSET_VERSION = "20260914-mednoe-1";
+const CACHE_NAME = "klev-ryadom-v11-mobile";
+const ASSET_VERSION = "20260914-mobile-2";
 const APP_SHELL = [
   "./",
   "./index.html",

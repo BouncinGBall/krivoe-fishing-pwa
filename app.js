@@ -16,7 +16,7 @@
   const requestedLake = new URLSearchParams(location.search).get("lake");
   let selectedLake = lakes[requestedLake] ? requestedLake : readJson("klev-selected-lake", "krivoe");
   if (!lakes[selectedLake]) selectedLake = "krivoe";
-  let viewMode = lakes[selectedLake].expedition ? "hybrid" : "2d";
+  let viewMode = lakes[selectedLake].expedition && navigator.onLine !== false ? "hybrid" : "2d";
   let leafletMap = null;
   let leafletLayers = [];
   let leafletBaseLayer = null;
@@ -106,7 +106,12 @@
     $("zoomIn").addEventListener("click", () => zoomMap(1.28));
     window.addEventListener("popstate", () => navigate(location.hash.slice(1) || "map", false));
     window.addEventListener("online", () => { setConnection("online", "онлайн"); fetchWeather(false); });
-    window.addEventListener("offline", () => { setConnection("offline", "локально"); showToast("Нет сети — работаю по последнему прогнозу"); });
+    window.addEventListener("offline", () => {
+      setConnection("offline", "локально");
+      if (viewMode === "hybrid") setMode("2d");
+      renderAll();
+      showToast(weatherUsable() ? "Нет сети — схема берега и сохранённый прогноз" : "Нет сети — схема берега; свежего прогноза нет");
+    });
     window.addEventListener("resize", resizeCanvas);
     window.addEventListener("beforeinstallprompt", (event) => { event.preventDefault(); deferredInstallPrompt = event; $("installButton").hidden = false; });
     $("installButton").addEventListener("click", async () => {
@@ -147,6 +152,7 @@
   }
 
   function setMode(mode) {
+    if (mode === "hybrid" && !isOnline()) { mode = "2d"; showToast("Без сети доступна схема берега; спутнику нужен интернет"); }
     if (mode === "3d" && !lake().contourLevels.length) { showToast("Нет измеренной карты дна: 3D-рельеф для этого озера не выдумываем"); return; }
     viewMode = mode;
     $("mode2d").classList.toggle("is-active", mode === "2d"); $("mode2d").setAttribute("aria-pressed", String(mode === "2d"));
@@ -614,6 +620,19 @@
     if (leafletMap || !window.L || !$("leafletMap")) return leafletMap;
     leafletMap = window.L.map("leafletMap", { zoomControl: false, touchZoom: true, attributionControl: true, preferCanvas: true, zoomSnap: .25, zoomDelta: .5, minZoom: 9, maxZoom: 19, inertia: true, tap: false });
     leafletBaseLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles © Esri" });
+    let loadedTiles = 0, failedTiles = 0;
+    leafletBaseLayer.on({
+      loading: () => { loadedTiles = 0; failedTiles = 0; },
+      tileload: () => { loadedTiles++; },
+      tileerror: () => { failedTiles++; },
+      load: () => {
+        // navigator.onLine can be true on a Wi-Fi network without internet.
+        if (failedTiles && !loadedTiles && viewMode === "hybrid") {
+          setMode("2d");
+          showToast("Спутник не загрузился — включена схема берега. Гибрид можно повторить при появлении сети");
+        }
+      }
+    });
     leafletBaseLayer.addTo(leafletMap);
     window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom:19, attribution:"Labels © Esri" }).addTo(leafletMap);
     window.L.control.scale({ imperial:false, position:"bottomleft" }).addTo(leafletMap);
@@ -646,6 +665,20 @@
     if (zonesVisible) {
       const ranked = rankedHotspots(settings.fish); const rankById = new Map(ranked.map((item, index) => [item.spot.id, { ...item, rank: index + 1 }]));
       ranked.forEach(({spot}) => { const item = rankById.get(spot.id); const rank = item?.rank || 99; const selected = settings.fish !== "universal"; const top = rank <= 3; const marker = window.L.circleMarker([spot.lat, spot.lon], { radius: selected && top ? 9 : 6, color: selected && top ? "#f3d889" : "#e4cd7d", weight: selected && rank === 1 ? 3 : 1.5, fillColor: "#f3d889", fillOpacity: selected && top ? .72 : .35, interactive: true, bubblingMouseEvents:false }).addTo(leafletMap); marker.bindTooltip(`${selected ? rank + ". " : ""}${escapeHtml(spot.name)} · ${escapeHtml(spot.depth)}`, { direction: "top", opacity: .92 }); marker.on("click", event => { window.L.DomEvent.stopPropagation(event); showMapToast(spot.name + " · " + spot.depth + " · " + spot.species + " · поисковая гипотеза"); }); leafletLayers.push(marker); });
+    }
+    journal.filter(entry => entry.lake === selectedLake && Number.isFinite(entry.lat) && Number.isFinite(entry.lon)).forEach(entry => {
+      const title = entry.title || "Моя точка";
+      const icon = window.L.divIcon({ className: "journal-point-marker", html: `<span class="${entry.type === "catch" ? "is-catch" : ""}"></span>`, iconSize: [14,14], iconAnchor: [7,7] });
+      const marker = window.L.marker([entry.lat,entry.lon], { icon, title, bubblingMouseEvents:false }).addTo(leafletMap);
+      marker.bindTooltip(escapeHtml(title + (entry.depth ? " · " + entry.depth + " м · мой промер" : "") + (entry.note ? " · " + entry.note : "")));
+      leafletLayers.push(marker);
+    });
+    if (mapState.user) {
+      if (Number.isFinite(mapState.user.accuracy) && mapState.user.accuracy > 0) {
+        leafletLayers.push(window.L.circle([mapState.user.lat,mapState.user.lon], { radius:mapState.user.accuracy, color:"#69baff", weight:1, fillOpacity:.09, interactive:false }).addTo(leafletMap));
+      }
+      const icon = window.L.divIcon({ className:"user-location-marker", html:"<span></span>", iconSize:[18,18], iconAnchor:[9,9] });
+      leafletLayers.push(window.L.marker([mapState.user.lat,mapState.user.lon], { icon, title:"Ваше местоположение", interactive:false, keyboard:false, zIndexOffset:1000 }).addTo(leafletMap));
     }
   }
   function syncMapSurface() {
@@ -784,9 +817,9 @@
   function nearestHotspot(lat,lon,w,h,bounds) { let best=null,bestPx=Infinity; rankedHotspots().forEach(({spot})=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34); const q=projectPoint(lat,lon,w,h,bounds,34); const d=Math.hypot(p.x-q.x,p.y-q.y); if(d<bestPx){bestPx=d;best=spot;}}); return bestPx<Math.max(24,w*.07) ? best : null; }
   let mapToastTimer=null;
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
-  function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude}; if (viewMode === "hybrid" && leafletMap) leafletMap.setView([pos.coords.latitude, pos.coords.longitude], Math.max(leafletMap.getZoom(), 14), { animate: true }); else drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
+  function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude,accuracy:pos.coords.accuracy}; if (viewMode === "hybrid" && leafletMap) { leafletMap.setView([pos.coords.latitude, pos.coords.longitude], Math.max(leafletMap.getZoom(), 14), { animate: true }); renderLeafletOverlays(); } else drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Не удалось определить позицию: проверьте разрешение геолокации и GPS"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260914-mednoe-1", { updateViaCache: "none" }).catch(()=>{});} }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260914-mobile-2", { updateViaCache: "none" }).catch(()=>{});} }
   function boot() {
     if (settings.fish !== "universal" && !lake().fishKinds.includes(settings.fish)) settings.fish = "universal";
     setupNavigation(); restoreWeatherCache();

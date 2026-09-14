@@ -412,6 +412,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .trip-detail a { color: var(--mint); overflow-wrap: anywhere; }
 .dot-lembolovo { background: #f3d889; }
 .dot-mednoe { background: #e8b790; }
+.journal-point-marker, .user-location-marker { background: none; border: 0; }
+.journal-point-marker span { display:block; width:14px; height:14px; border:2px solid #07181d; border-radius:50%; background:#65cfe0; }
+.journal-point-marker .is-catch { background:#f17973; }
+.user-location-marker span { display:block; width:18px; height:18px; border:3px solid white; border-radius:50%; background:#268cf0; box-shadow:0 0 0 4px rgba(38,140,240,.2); }
 .map-zoom button, .map-zoom #zoomReset { min-width: 44px; min-height: 44px; }
 .map-card { scroll-margin-top: 20px; }
 .modal-backdrop { z-index: 70; padding-bottom: max(18px,env(safe-area-inset-bottom)); }

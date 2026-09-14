@@ -9,7 +9,7 @@ const storage = new Map();
 const ctx = {window:{},document:{getElementById:el,querySelector:el,querySelectorAll:()=>[],addEventListener(){}},navigator:{onLine:false},location:{search:'?lake=lembolovo'},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},URLSearchParams,URL,Date,console,setTimeout,clearTimeout,AbortSignal};
 vm.createContext(ctx);
 for (const file of ['data.js','trip-data.js','mednoe-geometry.js','mednoe-data.js']) vm.runInContext(fs.readFileSync(file,'utf8'),ctx);
-const source = fs.readFileSync('app.js','utf8').replace('  document.addEventListener("DOMContentLoaded", boot);', '  window.test = {scoreAt,conditionsAt,weatherUsable,bestWindows,rankedHotspots,pointInWater,estimateDepth,moscowDay,moscowHour,renderAll,weatherUrl,renderExpedition, inject(data,at){weather=data;weatherCache[selectedLake]={data,at};},select(key){selectedLake=key;}};');
+const source = fs.readFileSync('app.js','utf8').replace('  document.addEventListener("DOMContentLoaded", boot);', '  window.test = {scoreAt,conditionsAt,weatherUsable,bestWindows,rankedHotspots,pointInWater,estimateDepth,moscowDay,moscowHour,renderAll,weatherUrl,renderExpedition,renderLeafletOverlays, overlays(map,entries,user){viewMode="hybrid";leafletMap=map;journal=entries;mapState.user=user;}, inject(data,at){weather=data;weatherCache[selectedLake]={data,at};},select(key){selectedLake=key;}};');
 vm.runInContext(source,ctx);
 const t=ctx.window.test, lake=ctx.window.LAKE_DATA.lembolovo;
 assert.equal(Object.keys(ctx.window.LAKE_DATA).length,5);
@@ -94,5 +94,22 @@ assert(html.indexOf('src="mednoe-geometry.js')<html.indexOf('src="mednoe-data.js
 assert(html.indexOf('src="mednoe-data.js')<html.indexOf('src="app.js'));
 const sw=fs.readFileSync('sw.js','utf8');
 for(const file of ['trip-data.js','mednoe-geometry.js','mednoe-data.js'])assert(sw.includes('./'+file));
-for(const file of ['index.html','app.js','sw.js'])assert(fs.readFileSync(file,'utf8').includes('20260914-mednoe-1'));
+for(const file of ['index.html','app.js','sw.js'])assert(fs.readFileSync(file,'utf8').includes('20260914-mobile-2'));
+// Regression: personal records and GPS must exist in hybrid, independently of
+// species filtering. Rerenders remove their previous layers before rebuilding.
+const overlayCalls=[];
+let removed=0;
+function layer(kind,coords,options) {
+  const result={kind,coords,options,remove(){removed++;},addTo(){return this;},bindTooltip(text){this.tooltip=text;return this;},on(){return this;}};
+  overlayCalls.push(result);return result;
+}
+ctx.window.L={divIcon:o=>o,...Object.fromEntries(['polygon','polyline','circleMarker','circle','marker'].map(kind=>[kind,(coords,options)=>layer(kind,coords,options)]))};
+t.overlays({},[{lake:'mednoe',lat:60.1931,lon:30.14328,type:'catch',note:'<script>test</script>'},{lake:'lembolovo',lat:60.39,lon:30.3,type:'spot'}],{lat:60.1932,lon:30.1433,accuracy:12});
+t.renderLeafletOverlays();
+assert.equal(overlayCalls.filter(c=>c.options?.icon?.className==='journal-point-marker').length,1);
+assert(overlayCalls.find(c=>c.options?.icon?.className==='journal-point-marker').tooltip.includes('&lt;script&gt;'));
+assert.equal(overlayCalls.filter(c=>c.options?.icon?.className==='user-location-marker').length,1);
+assert.equal(overlayCalls.find(c=>c.kind==='circle').options.radius,12);
+const firstLayerCount=overlayCalls.length;t.renderLeafletOverlays();assert.equal(removed,firstLayerCount);
+console.log('PASS: hybrid journal/GPS coordinates, accuracy circle, escaping and old-layer cleanup.');
 console.log('PASS: five lakes; fish selectors and filters; Mednoe area/shoreline/ten islands/dry access; no invented depths; honest comparison; weather freshness/units/nulls/storm; Moscow time; offline rendering; script order and PWA assets.');
