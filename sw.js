@@ -1,11 +1,13 @@
-const CACHE_NAME = "klev-ryadom-v9-shore";
-const ASSET_VERSION = "20260914-shore-1";
+const CACHE_NAME = "klev-ryadom-v10-mednoe";
+const ASSET_VERSION = "20260914-mednoe-1";
 const APP_SHELL = [
   "./",
   "./index.html",
   `./styles.css?v=${ASSET_VERSION}`,
   `./data.js?v=${ASSET_VERSION}`,
   `./trip-data.js?v=${ASSET_VERSION}`,
+  `./mednoe-geometry.js?v=${ASSET_VERSION}`,
+  `./mednoe-data.js?v=${ASSET_VERSION}`,
   `./app.js?v=${ASSET_VERSION}`,
   "./manifest.webmanifest",
   "./icon.svg",

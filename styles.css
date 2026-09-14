@@ -80,7 +80,7 @@ h3 { margin: 0; font-size: 20px; letter-spacing: -.03em; font-weight: 500; }
 .score-label { display: block; color: var(--mint); font-size: 12px; font-weight: 600; line-height: 1.15; }
 .score-copy small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.35; }
 
-.lake-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.lake-picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
 .lake-tab { min-width: 0; min-height: 66px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 13px; background: rgba(13,41,48,.5); text-align: left; transition: .18s ease; }
 .lake-tab:hover { border-color: var(--line-strong); }
 .lake-tab.is-selected { border-color: rgba(159,231,199,.52); background: linear-gradient(135deg, rgba(79,209,157,.15), rgba(13,41,48,.65)); box-shadow: inset 0 1px rgba(255,255,255,.03); }
@@ -411,6 +411,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .trip-detail article { padding: 16px 0; border-top: 1px solid var(--line); }
 .trip-detail a { color: var(--mint); overflow-wrap: anywhere; }
 .dot-lembolovo { background: #f3d889; }
+.dot-mednoe { background: #e8b790; }
 .map-zoom button, .map-zoom #zoomReset { min-width: 44px; min-height: 44px; }
 .map-card { scroll-margin-top: 20px; }
 .modal-backdrop { z-index: 70; padding-bottom: max(18px,env(safe-area-inset-bottom)); }

@@ -16,7 +16,7 @@
   const requestedLake = new URLSearchParams(location.search).get("lake");
   let selectedLake = lakes[requestedLake] ? requestedLake : readJson("klev-selected-lake", "krivoe");
   if (!lakes[selectedLake]) selectedLake = "krivoe";
-  let viewMode = selectedLake === "lembolovo" ? "hybrid" : "2d";
+  let viewMode = lakes[selectedLake].expedition ? "hybrid" : "2d";
   let leafletMap = null;
   let leafletLayers = [];
   let leafletBaseLayer = null;
@@ -68,7 +68,7 @@
     if (!cached || !weatherUsable(cached.data, key)) return false;
     weather = cached.data;
     const age = Date.now() - Number(cached.at || 0);
-    $("updatedLabel").textContent = age < 3600000 ? "из кэша · недавно" : "из кэша · " + new Date(cached.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    $("updatedLabel").textContent = age < 3600000 ? "из кэша · недавно" : "из кэша · " + new Date(cached.at).toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }) + " МСК";
     return true;
   }
 
@@ -174,7 +174,7 @@
       if (requestId !== weatherRequestId || requestLake !== selectedLake) return;
       if (!data.hourly?.time?.length || data.hourly_units?.wind_speed_10m !== "m/s") throw new Error("Unexpected weather response");
       weather = data; weatherError = false; weatherCache[requestLake] = { at: Date.now(), data }; writeJson(WEATHER_CACHE_KEY, weatherCache); setConnection("online", "онлайн");
-      const stamp = new Date(); $("updatedLabel").textContent = "обновлено " + stamp.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const stamp = new Date(); $("updatedLabel").textContent = "обновлено " + stamp.toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }) + " МСК";
     } catch (_) {
       if (requestId !== weatherRequestId || requestLake !== selectedLake) return;
       weatherError = true; if (!weather) restoreWeatherCache(); setConnection("offline", "локально");
@@ -297,6 +297,7 @@
   }
 
   function renderAll() {
+    if (settings.fish !== "universal" && !lake().fishKinds.includes(settings.fish)) settings.fish = "universal";
     const l = lake(); const c = currentConditions(); const score = scoreAt(new Date());
     $("lakeTitle").textContent = l.name; $("lakeAliases").textContent = l.aliases; $("lakeDescription").textContent = l.waterNote;
     $("scoreValue").textContent = score ?? "—"; $("scoreRing").style.setProperty("--score", score ?? 0); $("scoreRing").setAttribute("aria-label", score == null ? "Нет свежего индекса условий" : "Индекс условий " + score + " из 100, не вероятность улова"); $("scoreLabel").textContent = scoreLabel(score); $("scoreReason").textContent = scoreReason(score, c);
@@ -325,6 +326,8 @@
   }
   function renderDepthScale() {
     const l = lake(); const levels = Array.isArray(l.contourLevels) ? l.contourLevels : [];
+    $("legendDeep").hidden = !levels.length;
+    $("legendShallow").hidden = !levels.length;
     const chips = $("depthScaleChips"); const note = $("depthScaleNote"); const confidence = $("depthConfidenceChip");
     if (!chips || !note || !confidence) return;
     chips.innerHTML = levels.map((level, index) => `<span class="depth-scale-chip ${index === levels.length - 1 ? "is-deep" : ""}">${escapeHtml(depthText(level))}</span>`).join("");
@@ -544,7 +547,7 @@
     if (!trip) return;
     const first = bestWindows(1)[0], c = currentConditions(), today = moscowDay();
     el.innerHTML = `<div class="section-heading"><div><p class="eyebrow">БЕРЕГ · ВАШИ СНАСТИ</p><h2 id="tripHeading">${escapeHtml(trip.title)}</h2></div><span class="muted-label">Разбор ${trip.checked}</span></div>
-      <div class="trip-verdict"><span class="trip-badge">МОЙ ВЫБОР</span><p>${escapeHtml(trip.verdict)}</p><p class="trip-caveat">${escapeHtml(trip.caveat)}</p></div>
+      <div class="trip-verdict"><span class="trip-badge">${escapeHtml(trip.badge || "ПЛАН БЕРЕГОВОЙ РАЗВЕДКИ")}</span><p>${escapeHtml(trip.verdict)}</p><p class="trip-caveat">${escapeHtml(trip.caveat)}</p></div>
       <div class="trip-live"><strong>Ближайшее погодное окно · МСК</strong><p>${first ? escapeHtml(first.label) + " · индекс " + first.score + "/100" : "Нет свежего будущего окна: обновите прогноз."}</p><small>Воздух ${fmt(c.temperature,1)} °C · ветер ${fmt(c.wind,1)} м/с · порывы ${fmt(c.gusts,1)} м/с. Это прогноз, не датчик рыбы или воды.</small></div>
       <h3>Куда приехать</h3>
       ${trip.access.map(p => `<article class="trip-access"><strong>${escapeHtml(p.name)}</strong><p>${escapeHtml(p.note)}</p>${mapLinks(p.lat,p.lon)}</article>`).join("")}
@@ -552,7 +555,7 @@
       <div class="trip-sessions">${trip.sessions.map(p => `<article class="${p.date < today ? "is-past" : ""}"><small>${p.date < today ? "АРХИВ · " : ""}${escapeHtml(p.title)}</small><strong>${escapeHtml(p.time)}</strong><p>${escapeHtml(p.text)}</p></article>`).join("")}</div>
       <details open class="trip-detail"><summary>Тактика: что делать по шагам</summary><div>${trip.tactics.map(p => `<article><h4>${escapeHtml(p[0])}</h4><p>${escapeHtml(p[1])}</p></article>`).join("")}</div></details>
       <details class="trip-detail"><summary>Точки под выбранную рыбу · ${escapeHtml(fishLabel(settings.fish))}</summary><div>${rankedHotspots().map(({spot},i) => `<article><h4>${i+1}. ${escapeHtml(spot.name)}</h4><p>${escapeHtml(spot.reason)}. ${escapeHtml(spot.depth)}. Метка — сектор воды, не место парковки и не подтверждённая стоянка рыбы.</p><button type="button" class="button button-ghost" data-trip-point="${spot.id}">Показать на карте ↑</button>${mapLinks(spot.lat,spot.lon)}</article>`).join("")}</div></details>
-      <details class="trip-detail"><summary>Почему это озеро, а не ближе</summary><div>${trip.alternatives.map(p => `<article><h4>${escapeHtml(p[0])} · ${escapeHtml(p[1])}</h4><p>${escapeHtml(p[2])}</p></article>`).join("")}<p class="trip-muted">Расстояния по прямой, не километраж дороги. Сравнение качественное, одинаковой статистики береговых уловов нет.</p></div></details>
+      <details class="trip-detail"><summary>Сравнение вариантов</summary><div>${trip.alternatives.map(p => `<article><h4>${escapeHtml(p[0])} · ${escapeHtml(p[1])}</h4><p>${escapeHtml(p[2])}</p></article>`).join("")}<p class="trip-muted">Расстояния по прямой, не километраж дороги. Сравнение качественное, одинаковой статистики береговых уловов нет.</p></div></details>
       <details class="trip-detail"><summary>Источники и ограничения · ${trip.sources.length}</summary><div>${trip.sources.map(p => `<article><a href="${escapeHtml(p.href)}" target="_blank" rel="noreferrer">${escapeHtml(p.label)} ↗</a><p>${escapeHtml(p.note)}</p></article>`).join("")}</div></details>`;
     qsa("[data-trip-point]").forEach(button => button.addEventListener("click", () => { focusHotspot(button.dataset.tripPoint); qs(".map-card").scrollIntoView({behavior:"smooth",block:"start"}); }));
   }
@@ -657,7 +660,7 @@
     const l = lake(), sameLake = map._klevLakeKey === selectedLake;
     map._klevLakeKey = selectedLake;
     if (!sameLake) {
-      if (l.expedition) map.setView(l.focus, 13, {animate:false});
+      if (l.expedition) map.setView(l.focus, l.initialZoom || 13, {animate:false});
       else map.fitBounds(window.L.latLngBounds(l.geometry).pad(.08), {animate:false});
     }
     setTimeout(() => { map.invalidateSize({pan:false}); renderLeafletOverlays(); updateZoomUi(); }, 0);
@@ -667,7 +670,14 @@
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; constrainMapPan(w, h); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
     drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34)); drawLand(ctx,w,h,bounds);
     ctx.save(); if (viewMode === "3d") applyTerrainTransform(ctx,w,h); const cx=w/2,cy=h/2; ctx.translate(cx + mapState.panX, cy + mapState.panY); ctx.scale(mapState.scale, mapState.scale); ctx.translate(-cx,-cy);
-    if (viewMode === "3d") { drawTerrainShadow(ctx,base,w,h); drawTerrainGrid(ctx,w,h,base); } drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base,viewMode === "3d",w,h); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); if (depthVisible) drawDepthLabels(ctx,base,viewMode === "3d",w,h); ctx.restore(); updateZoomUi();
+    if (viewMode === "3d") { drawTerrainShadow(ctx,base,w,h); drawTerrainGrid(ctx,w,h,base); } drawWater(ctx,base,viewMode === "3d"); if (depthVisible) drawDepthBands(ctx,base,viewMode === "3d",w,h); drawIslands(ctx,w,h,bounds); if (selectedLake === "sukhodol") drawRiver(ctx,bounds); if (zonesVisible) drawHotspots(ctx,bounds); drawJournalPoints(ctx,w,h,bounds); if (mapState.user) drawUser(ctx, projectPoint(mapState.user.lat,mapState.user.lon,w,h,bounds,34)); if (depthVisible) drawDepthLabels(ctx,base,viewMode === "3d",w,h); ctx.restore(); updateZoomUi();
+  }
+  function drawIslands(ctx,w,h,bounds) {
+    (lake().holes || []).forEach(ring => {
+      pathPolygon(ctx,ring.map(p => projectPoint(p[0],p[1],w,h,bounds,34)));
+      ctx.fillStyle = "#20483e"; ctx.fill();
+      ctx.strokeStyle = "rgba(159,231,199,.78)"; ctx.lineWidth = 1 / mapState.scale; ctx.stroke();
+    });
   }
   function drawMapBackground(ctx,w,h) { const g = ctx.createLinearGradient(0,0,w,h); g.addColorStop(0,"#12353a"); g.addColorStop(1,"#071d23"); ctx.fillStyle=g;ctx.fillRect(0,0,w,h); ctx.strokeStyle="rgba(159,231,199,.07)";ctx.lineWidth=1; const step=Math.max(40,w/14); for(let x=0;x<w;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();} for(let y=0;y<h;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();} }
   function drawLand(ctx,w,h,bounds) { ctx.fillStyle="rgba(31,69,56,.45)"; ctx.fillRect(0,0,w,h); ctx.fillStyle="rgba(83,125,89,.12)"; for(let i=0;i<18;i++){const x=(i*173)%w,y=(i*97)%h;ctx.beginPath();ctx.arc(x,y,7+(i%4)*3,0,Math.PI*2);ctx.fill();} }
@@ -776,7 +786,7 @@
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
   function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude}; if (viewMode === "hybrid" && leafletMap) leafletMap.setView([pos.coords.latitude, pos.coords.longitude], Math.max(leafletMap.getZoom(), 14), { animate: true }); else drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260914-shore-1", { updateViaCache: "none" }).catch(()=>{});} }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260914-mednoe-1", { updateViaCache: "none" }).catch(()=>{});} }
   function boot() {
     if (settings.fish !== "universal" && !lake().fishKinds.includes(settings.fish)) settings.fish = "universal";
     setupNavigation(); restoreWeatherCache();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#071b22">
-  <meta name="description" content="Бесплатный береговой план, карта и погодные условия: Лемболовское, Кривое, Уловное и Суходольское.">
+  <meta name="description" content="Бесплатный береговой план, карта и погодные условия: Медное, Лемболовское, Кривое, Уловное и Суходольское.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Клёв рядом">
@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
-  <link rel="stylesheet" href="styles.css?v=20260914-shore-1">
+  <link rel="stylesheet" href="styles.css?v=20260914-mednoe-1">
   <title>Клёв рядом · Карта озёр</title>
 </head>
 <body>
@@ -92,7 +92,7 @@
             <p id="fishMapNote">Выберите рыбу в прогнозе или в полевом справочнике — маркеры на карте перестроятся.</p>
           </div>
           <div class="map-footer">
-            <div class="map-footer-main"><div class="legend"><span><i class="legend-deep"></i>глубже</span><span><i class="legend-shallow"></i>мельче</span><span><i class="legend-zone"></i>перспективная зона</span></div><small class="map-attribution">Контуры: © OpenStreetMap contributors</small></div>
+            <div class="map-footer-main"><div class="legend"><span id="legendDeep"><i class="legend-deep"></i>глубже</span><span id="legendShallow"><i class="legend-shallow"></i>мельче</span><span><i class="legend-zone"></i>поисковая зона</span></div><small class="map-attribution">Контуры: © OpenStreetMap contributors</small></div>
             <button id="copyCoordinates" class="coords-button" type="button" aria-label="Скопировать координаты выбранного водоёма">координаты: —</button>
             <button id="addPointButton" class="button button-primary button-small" type="button">＋ Моя точка</button>
           </div>
@@ -213,8 +213,10 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-  <script src="data.js?v=20260914-shore-1"></script>
-  <script src="trip-data.js?v=20260914-shore-1"></script>
-  <script src="app.js?v=20260914-shore-1" defer></script>
+  <script src="data.js?v=20260914-mednoe-1"></script>
+  <script src="trip-data.js?v=20260914-mednoe-1"></script>
+  <script src="mednoe-geometry.js?v=20260914-mednoe-1"></script>
+  <script src="mednoe-data.js?v=20260914-mednoe-1"></script>
+  <script src="app.js?v=20260914-mednoe-1" defer></script>
 </body>
 </html>
