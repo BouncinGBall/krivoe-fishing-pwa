@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#071b22">
-  <meta name="description" content="Бесплатная офлайн-карта и прогноз клёва для Кривого, Уловного и Суходольского озёр.">
+  <meta name="description" content="Бесплатный береговой план, карта и погодные условия: Лемболовское, Кривое, Уловное и Суходольское.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Клёв рядом">
@@ -12,7 +12,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
-  <link rel="stylesheet" href="styles.css?v=20260901-hybrid-calm-4">
+  <link rel="stylesheet" href="styles.css?v=20260914-shore-1">
   <title>Клёв рядом · Карта озёр</title>
 </head>
 <body>
@@ -20,7 +20,7 @@
     <header class="topbar">
       <a class="brand" href="#map" aria-label="Клёв рядом — карта">
         <span class="brand-mark" aria-hidden="true"><span></span></span>
-        <span><strong>Клёв рядом</strong><small>Карелия · Приозерский район</small></span>
+        <span><strong>Клёв рядом</strong><small>Петербург · Ленинградская область</small></span>
       </a>
       <div class="topbar-meta">
         <span id="connectionBadge" class="connection-badge is-offline"><i></i><span>локально</span></span>
@@ -36,15 +36,16 @@
             <h1 id="mapHeading"><span id="lakeTitle">Кривое озеро</span><br><em id="lakeAliases">Щучье озеро · Linnajärvi</em></h1>
             <p id="lakeDescription" class="hero-description">Ориентир для рыбалки: карта рельефа, перспективные зоны и погода в одной точке.</p>
             <div class="hero-actions">
+              <button id="tripJump" class="button button-ghost" type="button" hidden>План выезда ↓</button>
               <button id="refreshButton" class="button button-primary" type="button"><span class="button-icon">↻</span> Обновить прогноз</button>
           <button id="satelliteButton" class="button button-ghost" type="button" aria-label="Открыть внешний спутниковый слой Google Maps, нужна сеть"><span class="button-icon">↗</span> Спутник</button>
             </div>
           </div>
           <div class="score-panel" aria-live="polite">
-            <div class="score-ring" id="scoreRing" style="--score: 0" aria-label="Шанс клёва 0 из 100">
-              <div><strong id="scoreValue">—</strong><span>из 100</span></div>
+            <div class="score-ring" id="scoreRing" style="--score: 0" aria-label="Индекс условий, не вероятность улова">
+              <div><strong id="scoreValue">—</strong><span>индекс / 100</span></div>
             </div>
-            <div class="score-copy"><span id="scoreLabel" class="score-label">считаю…</span><small id="scoreReason">Погода и время влияют на оценку</small></div>
+            <div class="score-copy"><span id="scoreLabel" class="score-label">считаю…</span><small id="scoreReason">Индекс условий, не вероятность улова</small></div>
           </div>
         </div>
 
@@ -81,7 +82,7 @@
             <div id="mapToast" class="map-toast" hidden></div>
           </div>
           <div class="depth-strip" aria-live="polite" aria-label="Шкала глубин выбранного водоёма">
-            <div class="depth-strip-head"><span><i class="depth-strip-mark"></i>Линии глубины · метки привязаны к контуру</span><span id="depthConfidenceChip" class="confidence-chip">уверенность —</span></div>
+            <div class="depth-strip-head"><span><i class="depth-strip-mark"></i>Достоверность глубин</span><span id="depthConfidenceChip" class="confidence-chip">уверенность —</span></div>
             <div id="depthScaleChips" class="depth-scale-chips"></div>
             <p id="depthScaleNote">Проверяю опубликованную схему…</p>
           </div>
@@ -99,7 +100,7 @@
 
         <div class="quick-grid">
           <article class="info-card primary-card">
-            <div class="card-topline"><span class="card-icon sun-icon">☼</span><span>Лучшее окно сегодня</span><span id="bestWindowScore" class="tiny-score">—</span></div>
+            <div class="card-topline"><span class="card-icon sun-icon">☼</span><span>Ближайшее окно</span><span id="bestWindowScore" class="tiny-score">—</span></div>
             <strong id="bestWindow">—</strong>
             <p id="bestWindowReason">Загружаю почасовой прогноз</p>
           </article>
@@ -120,8 +121,10 @@
           </article>
         </div>
 
+        <section id="expeditionSection" class="trip-section" aria-labelledby="tripHeading" hidden></section>
+
         <section class="conditions-section" aria-labelledby="conditionsHeading">
-          <div class="section-heading"><div><p class="eyebrow">РАЗБОР СЕЙЧАС</p><h2 id="conditionsHeading">Почему такой шанс</h2></div><span id="conditionsUpdated" class="muted-label">по погоде и ритму</span></div>
+          <div class="section-heading"><div><p class="eyebrow">РАЗБОР СЕЙЧАС</p><h2 id="conditionsHeading">Что говорят условия</h2></div><span id="conditionsUpdated" class="muted-label">по погоде и ритму</span></div>
           <div id="conditionCards" class="condition-grid"></div>
           <div class="conditions-narrative">
             <div class="narrative-icon" aria-hidden="true">✦</div>
@@ -135,7 +138,7 @@
         </section>
 
         <section class="compare-section" aria-labelledby="compareHeading">
-          <div class="section-heading"><div><p class="eyebrow">СРАВНЕНИЕ</p><h2 id="compareHeading">Куда ехать сейчас</h2></div><span id="compareUpdated" class="muted-label">по одной погоде</span></div>
+          <div class="section-heading"><div><p class="eyebrow">СРАВНЕНИЕ</p><h2 id="compareHeading">Сравнение погодных условий</h2></div><span id="compareUpdated" class="muted-label">по одной погоде</span></div>
           <div id="compareList" class="compare-list"></div>
           <p class="disclaimer-line"><span>i</span> Это прозрачная модель, а не гарантия улова. Чем больше ваших промеров и записей — тем полезнее подсказка.</p>
         </section>
@@ -152,14 +155,14 @@
         <section class="hourly-section"><div class="section-heading"><div><p class="eyebrow">СЛЕДУЮЩИЕ 12 ЧАСОВ</p><h3>Ритм клёва</h3></div><span class="confidence-chip" id="forecastConfidence">уверенность —</span></div><div id="hourlyForecast" class="hourly-scroll" aria-label="Почасовой прогноз"></div></section>
         <section class="best-times-section"><div class="section-heading"><div><p class="eyebrow">ПОДСКАЗКА МОДЕЛИ</p><h3>Три окна для старта</h3></div></div><div id="bestTimesList" class="best-times-list"></div></section>
         <section class="forecast-detail-card" aria-labelledby="forecastDetailHeading"><div class="section-heading"><div><p class="eyebrow">ЧЕСТНЫЙ РАЗБОР</p><h3 id="forecastDetailHeading">Что двигает индекс</h3></div><span id="forecastDecision" class="confidence-chip">—</span></div><div id="forecastFactors" class="factor-list"></div><p id="forecastDetailNote" class="section-lead">Это объяснение модели, а не обещание улова. На воде подтвердите точку эхолотом или промером.</p></section>
-        <section class="method-card"><div class="method-icon">⌁</div><div><strong>Как считается индекс</strong><p>Ветер, давление и его тренд, облачность, осадки, температура, рассвет/закат, сезон, выбранная рыба и ваши прошлые записи. Вес каждого фактора виден в «Данные и правила».</p></div></section>
+        <section class="method-card"><div class="method-icon">⌁</div><div><strong>Как считается индекс</strong><p>Эвристика по ветру, давлению, облачности, осадкам, температуре воздуха и времени. Не обучена на местных уловах; луна и количество записей не повышают оценку. Формула — в «Данные».</p></div></section>
       </section>
 
       <section id="screen-journal" class="screen" data-screen="journal" aria-labelledby="journalHeading" hidden>
         <div class="section-heading page-heading"><div><p class="eyebrow">ВАШИ ДАННЫЕ</p><h2 id="journalHeading">Журнал на воде</h2><p class="section-lead">Промеры и уловы хранятся только на этом устройстве.</p></div><button id="journalAddButton" class="button button-primary button-small" type="button">＋ Добавить</button></div>
         <div class="journal-stats"><div><strong id="journalCount">0</strong><span>записей</span></div><div><strong id="journalCatchCount">0</strong><span>уловов</span></div><div><strong id="journalMeasureCount">0</strong><span>промеров</span></div></div>
         <div id="journalList" class="journal-list"></div>
-        <div id="journalEmpty" class="empty-state"><div class="empty-icon">✦</div><strong>Пока тихо</strong><p>Добавьте глубину, точку или улов — приложение начнёт калибровать подсказки под ваше озеро.</p><button id="journalEmptyButton" class="button button-ghost" type="button">＋ Первая запись</button></div>
+        <div id="journalEmpty" class="empty-state"><div class="empty-icon">✦</div><strong>Пока тихо</strong><p>Сохраните свои промеры и уловы для следующей поездки. Автоматического обучения на этих записях пока нет.</p><button id="journalEmptyButton" class="button button-ghost" type="button">＋ Первая запись</button></div>
         <div class="journal-actions"><button id="exportJsonButton" class="button button-ghost" type="button">↓ Экспорт JSON</button><button id="exportCsvButton" class="button button-ghost" type="button">↓ Экспорт CSV</button><button id="clearJournalButton" class="text-button" type="button">Очистить журнал</button></div>
       </section>
 
@@ -167,19 +170,19 @@
         <div class="section-heading page-heading"><div><p class="eyebrow">ПРОЗРАЧНО И ЧЕСТНО</p><h2 id="aboutHeading">Данные и правила</h2><p class="section-lead">Что карта знает, а где лучше включить эхолот.</p></div></div>
         <div class="truth-card"><span class="truth-mark">!</span><div><strong>Глубины — ориентир, не навигация</strong><p>ICESat‑2 не выдаёт готовую сплошную карту дна под этими озёрами. Здесь соединены контур береговой линии, опубликованные схемы и модель рельефа. Ваши промеры важнее любой красивой заливки. «LIVE» означает текущую погоду и пересчёт модели — потока реальных уловов в приложении нет.</p></div></div>
         <section class="depth-audit-section" aria-labelledby="depthAuditHeading">
-          <div class="section-heading"><div><p class="eyebrow">ПРОВЕРКА ГЛУБИН</p><h3 id="depthAuditHeading">Что подтверждено источниками</h3></div><span class="muted-label">обновлено 31.08.2026</span></div>
+          <div class="section-heading"><div><p class="eyebrow">ПРОВЕРКА ГЛУБИН</p><h3 id="depthAuditHeading">Что подтверждено источниками</h3></div><span class="muted-label">обновлено 14.09.2026</span></div>
           <div id="depthAuditList" class="depth-audit-list"></div>
           <p class="depth-audit-footnote">Скановые схемы и справочники помогают найти рельеф, но не заменяют эхолот. Числа с пометкой «ориентир» не предназначены для навигации.</p>
         </section>
         <div class="rule-list">
-          <article><span class="rule-number">01</span><div><strong>Индекс клёва 0–100</strong><p>Погода и суточный ритм дают основу; глубина и тип зоны подстраиваются под выбранную рыбу; уловы добавляют до +8 баллов, а промеры повышают уверенность.</p></div></article>
+          <article><span class="rule-number">01</span><div><strong>Индекс условий 0–100</strong><p>Основа 35 + до 19 за световой ритм; ветер −9…+10, давление −3…+8, тренд −4…+4, дождь −8…+5, облака −2…+4, видовая эвристика. Точки: до +8 за тип зоны плюс небольшой ручной приоритет. Это не статистическая вероятность. При грозе или порывах ≥15 м/с индекс снижается до 8; без свежей погоды — прочерк.</p></div></article>
           <article><span class="rule-number">02</span><div><strong>«Жорная зона» = гипотеза</strong><p>Метки показывают сочетание свала, мелководья и протоки. Это место для первого заброса, а не обещание поклёвки.</p></div></article>
-          <article><span class="rule-number">03</span><div><strong>Уверенность отдельно от балла</strong><p>Сеть, качество глубинного источника и количество ваших записей влияют на уверенность. Высокий балл с низкой уверенностью — повод проверить место, а не ехать вслепую.</p></div></article>
+          <article><span class="rule-number">03</span><div><strong>Достоверность отдельно от балла</strong><p>Проверяйте даты источников, лодочную или береговую ловлю и точность глубин. Модель не обучена на местных уловах: численный процент уверенности не рассчитывается. Ваши записи сохраняются, но не повышают индекс.</p></div></article>
           <article><span class="rule-number">04</span><div><strong>Бурная и лёд</strong><p>Для реки Бурной проверьте действующие правила и лицензии. Лёд, течение и погоду оценивайте лично; приложение не разрешает выход на лёд.</p></div></article>
           <article><span class="rule-number">05</span><div><strong>Прогноз — подсказка</strong><p>Погодные данные обновляются при наличии сети и сохраняются локально. Без сети остаётся последний кэш и офлайн‑карта; спутниковый слой требует интернет.</p></div></article>
         </div>
         <section class="sources-section"><div class="section-heading"><div><p class="eyebrow">ИСТОЧНИКИ</p><h3>Откуда взялись слои</h3></div></div><div id="sourcesList" class="sources-list"></div></section>
-        <div class="about-footer"><span>Клёв рядом · бесплатный PWA‑прототип</span><span id="appVersion">v0.4 · depth‑audit · offline‑first</span></div>
+        <div class="about-footer"><span>Клёв рядом · бесплатное PWA</span><span id="appVersion">v0.5 · береговой план · 14.09.2026</span></div>
       </section>
     </main>
 
@@ -210,7 +213,8 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-  <script src="data.js?v=20260901-hybrid-calm-4"></script>
-  <script src="app.js?v=20260901-hybrid-calm-4" defer></script>
+  <script src="data.js?v=20260914-shore-1"></script>
+  <script src="trip-data.js?v=20260914-shore-1"></script>
+  <script src="app.js?v=20260914-shore-1" defer></script>
 </body>
 </html>

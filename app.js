@@ -6,15 +6,17 @@
   const fishGuide = window.FISH_GUIDE || {};
   const STORAGE_KEY = "klev-ryadom-journal-v1";
   const SETTINGS_KEY = "klev-ryadom-settings-v1";
-  const WEATHER_CACHE_KEY = "klev-ryadom-weather-v1";
+  const WEATHER_CACHE_KEY = "klev-ryadom-weather-v2-ms";
   const $ = (id) => document.getElementById(id);
   const qs = (sel, root = document) => root.querySelector(sel);
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const fmt = (n, digits = 0) => Number.isFinite(n) ? n.toLocaleString("ru-RU", { maximumFractionDigits: digits }) : "—";
   const now = new Date();
-  let selectedLake = "krivoe";
-  let viewMode = "2d";
+  const requestedLake = new URLSearchParams(location.search).get("lake");
+  let selectedLake = lakes[requestedLake] ? requestedLake : readJson("klev-selected-lake", "krivoe");
+  if (!lakes[selectedLake]) selectedLake = "krivoe";
+  let viewMode = selectedLake === "lembolovo" ? "hybrid" : "2d";
   let leafletMap = null;
   let leafletLayers = [];
   let leafletBaseLayer = null;
@@ -54,9 +56,16 @@
   }
   function isOnline() { return navigator.onLine !== false; }
   function lake() { return lakes[selectedLake]; }
+  function moscowDay(date = new Date()) { return new Date(date.getTime() + 10800000).toISOString().slice(0, 10); }
+  function moscowHour(date = new Date()) { return (date.getUTCHours() + 3) % 24; }
+  function forecastTime(value) { return new Date(value + "+03:00").getTime(); }
+  function weatherUsable(data = weather, key = selectedLake) {
+    const times = data?.hourly?.time;
+    return !!times?.length && Date.now() - Number(weatherCache[key]?.at || 0) < 6 * 3600000 && forecastTime(times[0]) <= Date.now() && forecastTime(times[times.length - 1]) >= Date.now();
+  }
   function restoreWeatherCache(key = selectedLake) {
     const cached = weatherCache[key];
-    if (!cached || !cached.data) return false;
+    if (!cached || !weatherUsable(cached.data, key)) return false;
     weather = cached.data;
     const age = Date.now() - Number(cached.at || 0);
     $("updatedLabel").textContent = age < 3600000 ? "из кэша · недавно" : "из кэша · " + new Date(cached.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
@@ -64,6 +73,7 @@
   }
 
   function setupNavigation() {
+    qs(".lake-picker").innerHTML = lakeKeys.map(key => `<button class="lake-tab" type="button" role="tab" data-lake="${key}" aria-selected="${key === selectedLake}"><span class="lake-tab-dot dot-${key}"></span><span><strong>${escapeHtml(lakes[key].name.replace(" озеро", ""))}</strong><small>${escapeHtml(lakes[key].area)}</small></span><b data-mini-score="${key}">—</b></button>`).join("");
     qsa("[data-screen-target]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.screenTarget)));
     qsa(".lake-tab").forEach((button) => button.addEventListener("click", () => selectLake(button.dataset.lake)));
     $("mode2d").addEventListener("click", () => setMode("2d"));
@@ -127,48 +137,68 @@
   function selectLake(key) {
     if (!lakes[key]) return;
     selectedLake = key; mapState.scale = 1; mapState.panX = 0; mapState.panY = 0; mapState.user = null; weather = null; weatherError = false; restoreWeatherCache(key);
+    writeJson("klev-selected-lake", key);
+    const url = new URL(location.href); url.searchParams.set("lake", key); history.replaceState({}, "", url);
+    if (settings.fish !== "universal" && !lake().fishKinds.includes(settings.fish)) settings.fish = "universal";
     qsa(".lake-tab").forEach((button) => { const active = button.dataset.lake === key; button.classList.toggle("is-selected", active); button.setAttribute("aria-selected", String(active)); });
+    if (!lake().contourLevels.length || viewMode === "hybrid") setMode("hybrid");
     renderAll();
-    if (viewMode === "hybrid") syncMapSurface();
     showToast(lakes[key].name + " · карта обновлена", 1800); fetchWeather(false);
   }
 
   function setMode(mode) {
+    if (mode === "3d" && !lake().contourLevels.length) { showToast("Нет измеренной карты дна: 3D-рельеф для этого озера не выдумываем"); return; }
     viewMode = mode;
     $("mode2d").classList.toggle("is-active", mode === "2d"); $("mode2d").setAttribute("aria-pressed", String(mode === "2d"));
     $("modeHybrid").classList.toggle("is-active", mode === "hybrid"); $("modeHybrid").setAttribute("aria-pressed", String(mode === "hybrid"));
     $("mode3d").classList.toggle("is-active", mode === "3d"); $("mode3d").setAttribute("aria-pressed", String(mode === "3d"));
-    $("mapModeLabel").textContent = mode === "3d" ? "3D · наклонный рельеф" : mode === "hybrid" ? "Гибрид · спутник + рельеф" : "2D · модельная батиметрия";
+    $("mapModeLabel").textContent = mode === "3d" ? "3D · иллюстративная модель" : mode === "hybrid" ? "Гибрид · спутник + точки" : lake().contourLevels.length ? "2D · модель, не промеры" : "2D · схема берега";
     $("lakeCanvas").dataset.mode = mode;
     renderMapMeta();
     syncMapSurface();
   }
   function updateToggle(button, active) { button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); }
 
-  function weatherUrl() {
-    const c = lake().center;
-    const params = new URLSearchParams({ latitude: c[0], longitude: c[1], timezone: "Europe/Moscow", forecast_days: "2", current: "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m", hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m", daily: "sunrise,sunset" });
+  function weatherUrl(key = selectedLake) {
+    const l = lakes[key]; const c = l.weatherCenter || l.center;
+    const params = new URLSearchParams({ latitude: c[0], longitude: c[1], timezone: "Europe/Moscow", wind_speed_unit: "ms", forecast_days: "2", current: "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m", hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m", daily: "sunrise,sunset" });
     return "https://api.open-meteo.com/v1/forecast?" + params;
   }
   async function fetchWeather(force) {
     if (!isOnline()) { weatherError = true; restoreWeatherCache(); setConnection("offline", "локально"); renderAll(); return; }
-    const requestId = ++weatherRequestId; setConnection("syncing", "обновляю");
+    const requestId = ++weatherRequestId; const requestLake = selectedLake; setConnection("syncing", "обновляю");
     try {
-      const response = await fetch(weatherUrl(), { cache: force ? "no-store" : "default" });
+      const response = await fetch(weatherUrl(), { cache: "no-store", signal: AbortSignal.timeout(12000) });
       if (!response.ok) throw new Error("weather " + response.status);
-      if (requestId !== weatherRequestId) return;
-      weather = await response.json(); weatherError = false; weatherCache[selectedLake] = { at: Date.now(), data: weather }; writeJson(WEATHER_CACHE_KEY, weatherCache); setConnection("online", "онлайн");
+      const data = await response.json();
+      if (requestId !== weatherRequestId || requestLake !== selectedLake) return;
+      if (!data.hourly?.time?.length || data.hourly_units?.wind_speed_10m !== "m/s") throw new Error("Unexpected weather response");
+      weather = data; weatherError = false; weatherCache[requestLake] = { at: Date.now(), data }; writeJson(WEATHER_CACHE_KEY, weatherCache); setConnection("online", "онлайн");
       const stamp = new Date(); $("updatedLabel").textContent = "обновлено " + stamp.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
     } catch (_) {
+      if (requestId !== weatherRequestId || requestLake !== selectedLake) return;
       weatherError = true; if (!weather) restoreWeatherCache(); setConnection("offline", "локально");
-      showToast("Погода недоступна — показываю локальную оценку", 3200);
+      showToast("Погода недоступна — используйте сохранённый прогноз, если он ещё свежий", 3200);
     }
     renderAll();
+    refreshComparison();
+  }
+
+  async function refreshComparison() {
+    await Promise.all(lakeKeys.filter(key => key !== selectedLake && !weatherUsable(weatherCache[key]?.data, key)).map(async key => {
+      try {
+        const response = await fetch(weatherUrl(key), { cache: "no-store", signal: AbortSignal.timeout(12000) });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.hourly?.time?.length && data.hourly_units?.wind_speed_10m === "m/s") weatherCache[key] = { at: Date.now(), data };
+      } catch (_) { /* No invented fallback weather. */ }
+    }));
+    writeJson(WEATHER_CACHE_KEY, weatherCache); renderCompare();
   }
 
   function weatherCodeText(code) {
     const map = { 0: "ясно", 1: "малооблачно", 2: "переменная облачность", 3: "пасмурно", 45: "туман", 48: "туман", 51: "морось", 53: "морось", 55: "морось", 61: "дождь", 63: "дождь", 65: "сильный дождь", 71: "снег", 73: "снег", 75: "сильный снег", 80: "ливни", 81: "ливни", 82: "сильные ливни", 95: "гроза", 96: "гроза", 99: "гроза" };
-    return map[code] || "условия меняются";
+    return map[code] || "нет данных";
   }
   function weatherIcon(code, isDay = 1) {
     if ([61,63,65,80,81,82].includes(code)) return "☂";
@@ -178,38 +208,34 @@
     return isDay ? "☼" : "☾";
   }
   function localConditions(hour = new Date().getHours()) {
-    const seasonal = Math.cos((hour - 13) / 24 * Math.PI * 2);
-    return { temperature: 15 + seasonal * 4, apparent: 15 + seasonal * 4, humidity: 72, precipitation: 0, wind: 3.5, direction: 220, pressure: 1014, cloud: 45, rainProb: 12, code: 2, isDay: hour >= 5 && hour < 22 };
+    return { temperature: NaN, apparent: NaN, humidity: NaN, precipitation: NaN, wind: NaN, gusts: NaN, direction: NaN, pressure: NaN, pressureTrend: NaN, cloud: NaN, rainProb: NaN, code: -1, isDay: hour >= 6 && hour < 20 };
   }
   function currentConditions() {
-    if (weather && weather.current) {
+    if (weatherUsable() && weather.current) {
       const c = weather.current;
-      const pNow = Number(c.pressure_msl ?? 1014); const pBefore = weather?.hourly?.pressure_msl ? Number(weather.hourly.pressure_msl[Math.max(0, nearestHourIndex(weather.hourly.time) - 3)] ?? pNow) : pNow;
-      return { temperature: c.temperature_2m, apparent: c.apparent_temperature, humidity: c.relative_humidity_2m, precipitation: c.precipitation, wind: c.wind_speed_10m, direction: c.wind_direction_10m, pressure: pNow, pressureTrend: pNow - pBefore, cloud: c.cloud_cover, rainProb: currentHourly("precipitation_probability"), code: c.weather_code, isDay: c.is_day };
+      const pNow = Number(c.pressure_msl ?? NaN); const pBefore = weather?.hourly?.pressure_msl ? Number(weather.hourly.pressure_msl[Math.max(0, nearestHourIndex(weather.hourly.time) - 3)] ?? pNow) : pNow;
+      return { temperature: c.temperature_2m, apparent: c.apparent_temperature, humidity: c.relative_humidity_2m, precipitation: c.precipitation, wind: c.wind_speed_10m, gusts: c.wind_gusts_10m, direction: c.wind_direction_10m, pressure: pNow, pressureTrend: pNow - pBefore, cloud: c.cloud_cover, rainProb: currentHourly("precipitation_probability"), code: c.weather_code, isDay: c.is_day };
     }
     return localConditions();
   }
   function currentHourly(field) {
-    if (!weather?.hourly?.time) return 12;
-    const idx = nearestHourIndex(weather.hourly.time); return Number(weather.hourly[field]?.[idx] ?? 12);
+    if (!weatherUsable()) return NaN;
+    const idx = nearestHourIndex(weather.hourly.time); return Number(weather.hourly[field]?.[idx] ?? NaN);
   }
   function nearestHourIndex(times, target = Date.now()) {
     let best = 0, delta = Infinity;
-    times.forEach((time, i) => { const d = Math.abs(new Date(time).getTime() - target); if (d < delta) { delta = d; best = i; } }); return best;
+    times.forEach((time, i) => { const d = Math.abs(forecastTime(time) - target); if (d < delta) { delta = d; best = i; } }); return best;
   }
   function solarHours(date = new Date()) {
-    let sunrise = 6, sunset = 20;
-    if (weather?.daily?.time && weather.daily.sunrise && weather.daily.sunset) {
-      const day = date.toISOString().slice(0, 10); let idx = weather.daily.time.indexOf(day);
-      if (idx < 0) idx = nearestHourIndex(weather.daily.time.map((x) => x + "T12:00"), date.getTime());
-      const rise = new Date(weather.daily.sunrise[idx]); const set = new Date(weather.daily.sunset[idx]);
-      if (Number.isFinite(rise.getTime())) sunrise = rise.getHours() + rise.getMinutes() / 60;
-      if (Number.isFinite(set.getTime())) sunset = set.getHours() + set.getMinutes() / 60;
-    }
-    return { sunrise, sunset };
+    const idx = weatherUsable() ? weather?.daily?.time?.indexOf(moscowDay(date)) : -1;
+    if (!(idx >= 0)) return { sunrise: NaN, sunset: NaN };
+    const decimal = value => { const d = new Date(forecastTime(value)); return moscowHour(d) + d.getUTCMinutes() / 60; };
+    return { sunrise: decimal(weather.daily.sunrise[idx]), sunset: decimal(weather.daily.sunset[idx]) };
   }
+
   function dayPhaseScore(date = new Date()) {
-    const h = date.getHours() + date.getMinutes() / 60; const solar = solarHours(date);
+    const h = moscowHour(date) + date.getUTCMinutes() / 60; const solar = solarHours(date);
+    if (!Number.isFinite(solar.sunrise)) return .5;
     const morning = Math.exp(-Math.pow((h - (solar.sunrise + 1)) / 2.2, 2));
     const evening = Math.exp(-Math.pow((h - (solar.sunset - 1)) / 2.4, 2));
     const midday = Math.exp(-Math.pow((h - ((solar.sunrise + solar.sunset) / 2)) / 4.5, 2));
@@ -231,11 +257,14 @@
     return clamp(.65 + (conditions.wind >= 2 && conditions.wind <= 7 ? .12 : 0) + (conditions.cloud > 35 ? .06 : 0), .3, 1);
   }
   function scoreAt(date, kind = settings.fish, hotspot = null) {
+    if (!weatherUsable()) return null;
     const c = conditionsAt(date);
-    const hour = date.getHours();
+    if (![c.temperature, c.wind, c.pressure, c.pressureTrend, c.rainProb, c.cloud].every(Number.isFinite)) return null;
+    const hour = moscowHour(date);
+    if ([95, 96, 99].includes(c.code) || c.gusts >= 15) return 8;
     let score = 35;
     score += 19 * dayPhaseScore(date);
-    score += 9 * moonScore(date);
+    // No lunar or catch-count bonus: neither is calibrated against local outcomes.
     score += c.wind >= 1.5 && c.wind <= 7 ? 10 : c.wind < 1 ? -4 : c.wind <= 11 ? 2 : -9;
     score += c.pressure >= 1005 && c.pressure <= 1025 ? 8 : c.pressure > 1030 ? -3 : -1;
     score += c.pressureTrend > 1 ? 4 : c.pressureTrend < -3 ? -4 : 0;
@@ -246,36 +275,21 @@
       const typeBonus = kind === "pike" && hotspot.kind === "shallow" ? 8 : kind === "perch" && (hotspot.kind === "drop" || hotspot.kind === "deep") ? 8 : kind === "roach" && hotspot.kind === "stream" ? 7 : kind === "burbot" && hotspot.kind === "deep" ? 8 : hotspot.kind === "drop" ? 3 : 0;
       score += typeBonus + (hotspot.score - 74) * .12;
     }
-    const lakeBias = {
-      universal: { krivoe: 1, ulovnoe: -3, sukhodol: 4 },
-      pike: { krivoe: 7, ulovnoe: 0, sukhodol: 4 },
-      perch: { krivoe: 5, ulovnoe: 4, sukhodol: 1 },
-      roach: { krivoe: -2, ulovnoe: 6, sukhodol: 5 },
-      bream: { krivoe: -3, ulovnoe: 5, sukhodol: 7 },
-      burbot: { krivoe: -1, ulovnoe: 7, sukhodol: 2 },
-      zander: { krivoe: -4, ulovnoe: 1, sukhodol: 5 },
-      ruff: { krivoe: 0, ulovnoe: 3, sukhodol: 1 }
-    };
-    score += (lakeBias[kind] || lakeBias.universal)[selectedLake] || 0;
-    const localBoost = journal.filter((entry) => entry.lake === selectedLake && entry.type === "catch").length;
-    score += clamp(localBoost * 1.5, 0, 8);
     return Math.round(clamp(score, 8, 94));
   }
   function conditionsAt(date) {
-    if (!weather?.hourly?.time) return localConditions(date.getHours());
-    const idx = nearestHourIndex(weather.hourly.time, date.getTime()); const h = weather.hourly;
-    const previous = Math.max(0, idx - 3);
-    return { temperature: Number(h.temperature_2m?.[idx] ?? 15), wind: Number(h.wind_speed_10m?.[idx] ?? 3.5), direction: Number(h.wind_direction_10m?.[idx] ?? 220), pressure: Number(h.pressure_msl?.[idx] ?? 1014), pressureTrend: Number(h.pressure_msl?.[idx] ?? 1014) - Number(h.pressure_msl?.[previous] ?? h.pressure_msl?.[idx] ?? 1014), cloud: Number(h.cloud_cover?.[idx] ?? 45), rainProb: Number(h.precipitation_probability?.[idx] ?? 12), code: Number(h.weather_code?.[idx] ?? 2), isDay: date.getHours() >= 5 && date.getHours() < 22 };
+    if (!weatherUsable() || date.getTime() < forecastTime(weather.hourly.time[0]) || date.getTime() > forecastTime(weather.hourly.time.at(-1))) return localConditions(moscowHour(date));
+    const idx = nearestHourIndex(weather.hourly.time, date.getTime()), h = weather.hourly;
+    const n = (field, i = idx) => Number(h[field]?.[i] ?? NaN);
+    return { temperature:n("temperature_2m"), wind:n("wind_speed_10m"), gusts:n("wind_gusts_10m"), direction:n("wind_direction_10m"), pressure:n("pressure_msl"), pressureTrend:n("pressure_msl")-n("pressure_msl",Math.max(0,idx-3)), cloud:n("cloud_cover"), rainProb:n("precipitation_probability"), code:n("weather_code"), isDay:moscowHour(date)>=6 && moscowHour(date)<20 };
   }
-  function confidence() {
-    let n = weather ? 62 : 32;
-    const depthQuality = String(lake().depthConfidence || "").toLowerCase();
-    n += depthQuality.includes("низкая / средняя") ? 4 : depthQuality.includes("средняя") ? 8 : 0;
-    n += Math.min(20, journal.filter((e) => e.lake === selectedLake && (e.type === "measure" || e.type === "catch")).length * 4);
-    return clamp(n, 20, 92);
-  }
-  function scoreLabel(score) { return score >= 75 ? "хороший шанс" : score >= 55 ? "нормальный шанс" : "осторожный прогноз"; }
+
+  function confidence() { return weatherUsable() ? "эвристика · не вероятность улова" : "нет свежей погоды"; }
+
+  function scoreLabel(score) { return score == null ? "нет свежего прогноза" : score >= 75 ? "условия благоприятны" : score >= 55 ? "обычные условия" : "сложные условия"; }
   function scoreReason(score, c) {
+    if (score == null) return "Погодный индекс недоступен; точки остаются поисковыми";
+    if ([95,96,99].includes(c.code) || c.gusts >= 15) return "Гроза / опасные порывы: отложите рыбалку";
     if (c.wind > 10) return "ветер снижает комфорт";
     if (c.rainProb > 65) return "осадки могут сбить активность";
     if (score >= 75) return "время и условия складываются";
@@ -285,11 +299,17 @@
   function renderAll() {
     const l = lake(); const c = currentConditions(); const score = scoreAt(new Date());
     $("lakeTitle").textContent = l.name; $("lakeAliases").textContent = l.aliases; $("lakeDescription").textContent = l.waterNote;
-    $("scoreValue").textContent = score; $("scoreRing").style.setProperty("--score", score); $("scoreRing").setAttribute("aria-label", "Шанс клёва " + score + " из 100"); $("scoreLabel").textContent = scoreLabel(score); $("scoreReason").textContent = scoreReason(score, c);
+    $("scoreValue").textContent = score ?? "—"; $("scoreRing").style.setProperty("--score", score ?? 0); $("scoreRing").setAttribute("aria-label", score == null ? "Нет свежего индекса условий" : "Индекс условий " + score + " из 100, не вероятность улова"); $("scoreLabel").textContent = scoreLabel(score); $("scoreReason").textContent = scoreReason(score, c);
     $("currentWeather").textContent = fmt(c.temperature, 0) + "° · " + weatherIcon(c.code, c.isDay);
     $("currentWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа · " + weatherCodeText(c.code);
     $("depthSummary").textContent = l.depthLabel; $("depthMeta").textContent = l.depthSource + " · " + l.depthConfidence.toLowerCase();
+    qsa(".lake-tab").forEach(button => { const active = button.dataset.lake === selectedLake; button.classList.toggle("is-selected", active); button.setAttribute("aria-selected", String(active)); });
+    $("mode3d").disabled = !l.contourLevels.length; $("depthToggle").disabled = !l.contourLevels.length;
+    $("mode3d").title = l.contourLevels.length ? "Модель, не измеренное дно" : "Нет измеренной карты дна";
+    if (!weatherUsable()) $("updatedLabel").textContent = "нет свежей погоды";
+    renderExpedition();
     renderMapMeta(); renderDepthScale(); renderDepthAudit(); renderFishMapGuide(); renderBestWindow(); renderBestZone(); renderCompare(); renderConditions(); renderFishGuide(); renderForecast(); renderJournal(); renderSources(); resizeCanvas(); if (viewMode === "hybrid") syncMapSurface();
+    $("fishSelect").innerHTML = $("mapFishSelect").innerHTML;
     $("fishSelect").value = settings.fish;
     const mapFishSelect = $("mapFishSelect"); if (mapFishSelect) { mapFishSelect.value = settings.fish; }
   }
@@ -309,7 +329,7 @@
     if (!chips || !note || !confidence) return;
     chips.innerHTML = levels.map((level, index) => `<span class="depth-scale-chip ${index === levels.length - 1 ? "is-deep" : ""}">${escapeHtml(depthText(level))}</span>`).join("");
     confidence.textContent = "уверенность: " + String(l.depthConfidence || "неизвестна").toLowerCase();
-    note.textContent = (l.depthNote || "Глубины — ориентир, проверьте эхолотом.") + " Контуры — визуальная интерполяция.";
+    note.textContent = (l.depthNote || "Глубины — ориентир, проверьте эхолотом.") + (levels.length ? " Контуры — иллюстративная модель, не геопривязанные промеры." : "");
   }
   function renderDepthAudit() {
     const target = $("depthAuditList"); if (!target) return;
@@ -322,7 +342,7 @@
   }
   function rankedHotspots(kind = settings.fish) {
     const target = kind || "universal";
-    return (lake().hotspots || []).map((spot) => ({ spot, score: scoreAt(new Date(), target, spot) })).sort((a, b) => b.score - a.score);
+    return (lake().hotspots || []).filter(spot => target === "universal" || !spot.fishKinds || spot.fishKinds.includes(target)).map((spot) => ({ spot, score: scoreAt(new Date(), target, spot) })).sort((a, b) => (b.score ?? b.spot.score) - (a.score ?? a.spot.score));
   }
   function renderFishMapGuide() {
     const target = settings.fish || "universal"; const label = fishLabel(target); const ranked = rankedHotspots(target); const points = $("fishMapPoints"); const title = $("fishMapTitle"); const targetEl = $("fishMapTarget"); const note = $("fishMapNote"); const mapSelect = $("mapFishSelect");
@@ -332,10 +352,10 @@
       mapSelect.innerHTML = ["universal", ...(lake().fishKinds || [])].filter((kind, index, arr) => available.has(kind) && arr.indexOf(kind) === index).map((kind) => `<option value="${escapeHtml(kind)}">${escapeHtml(fishLabel(kind))}</option>`).join("");
       mapSelect.value = available.has(target) ? target : "universal";
     }
-    title.textContent = target === "universal" ? "Перспективные точки" : "Лучшие точки на карте";
+    title.textContent = target === "universal" ? "Поисковые точки" : "Где начать поиск";
     targetEl.textContent = label;
-    points.innerHTML = ranked.slice(0, 3).map((item, index) => `<button type="button" class="fish-map-point ${index === 0 ? "is-best" : ""}" data-hotspot-id="${escapeHtml(item.spot.id)}"><span class="fish-map-rank">${index + 1}</span><span class="fish-map-point-main"><strong>${escapeHtml(item.spot.name)}</strong><small>${escapeHtml(item.spot.depth)} · ${escapeHtml(item.spot.species)}</small></span><b>${item.score}</b></button>`).join("");
-    note.textContent = target === "universal" ? "Показаны три стартовые зоны; выберите вид рыбы, чтобы пересчитать рейтинг." : "Золотые маркеры на карте — три лучшие зоны для выбранной рыбы. Рейтинг ориентировочный.";
+    points.innerHTML = ranked.slice(0, 3).map((item, index) => `<button type="button" class="fish-map-point ${index === 0 ? "is-best" : ""}" data-hotspot-id="${escapeHtml(item.spot.id)}"><span class="fish-map-rank">${index + 1}</span><span class="fish-map-point-main"><strong>${escapeHtml(item.spot.name)}</strong><small>${escapeHtml(item.spot.depth)} · ${escapeHtml(item.spot.species)}</small></span><b>${item.score ?? "—"}</b></button>`).join("");
+    note.textContent = "Поисковые гипотезы, не подтверждённые уловы. На карте только точки выбранного вида. Число — индекс условий, не вероятность поклёвки.";
     qsa("[data-hotspot-id]").forEach((button) => button.addEventListener("click", () => focusHotspot(button.dataset.hotspotId)));
   }
   function focusHotspot(id) {
@@ -346,12 +366,17 @@
     mapState.scale = Math.max(mapState.scale, 1.65); mapState.panX = cx - (cx + (p.x - cx) * mapState.scale); mapState.panY = cy - (cy + (p.y - cy) * mapState.scale); constrainMapPan(canvas.clientWidth, canvas.clientHeight); drawMap(); showMapToast(spot.name + " · " + spot.depth + " · " + fishLabel(settings.fish), 2600);
   }
   function renderBestWindow() {
-    const windows = bestWindows(3); const first = windows[0];
-    $("bestWindow").textContent = first ? first.label : "проверьте рассвет"; $("bestWindowReason").textContent = first ? first.reason : "Сеть недоступна — используйте локальный ориентир"; $("bestWindowScore").textContent = first ? first.score + "/100" : "—";
+    const first = bestWindows(3)[0];
+    $("bestWindow").textContent = first ? first.label : "Нет свежего окна";
+    $("bestWindowReason").textContent = first ? first.reason : "Обновите прогноз; время без погоды не выдумываем";
+    $("bestWindowScore").textContent = first ? first.score + "/100" : "—";
   }
+
   function renderBestZone() {
-    const l = lake(); const best = l.hotspots.map((spot) => ({ spot, score: scoreAt(new Date(), settings.fish, spot) })).sort((a, b) => b.score - a.score)[0];
-    $("bestZone").textContent = best ? best.spot.name : "первый свал"; $("bestZoneMeta").textContent = best ? best.spot.depth + " · " + best.spot.species : "модельная перспективная зона"; $("bestZoneScore").textContent = best ? best.score + "/100" : "—";
+    const best = rankedHotspots()[0];
+    $("bestZone").textContent = best ? best.spot.name : "Нет видовых точек";
+    $("bestZoneMeta").textContent = best ? best.spot.depth + " · " + best.spot.species : "Выберите другой вид";
+    $("bestZoneScore").textContent = best?.score != null ? best.score + "/100" : "—";
   }
 
   function fishLabel(kind) {
@@ -370,21 +395,25 @@
     return "убывающий серп";
   }
   function lightPhase(date = new Date()) {
-    const solar = solarHours(date); const h = date.getHours() + date.getMinutes() / 60;
+    const solar = solarHours(date); const h = moscowHour(date) + date.getUTCMinutes() / 60;
+    if (!Number.isFinite(solar.sunrise)) return "нет свежих данных";
     if (h < solar.sunrise - .7) return "предрассвет";
     if (h < solar.sunrise + 1.8) return "утренний выход";
     if (h > solar.sunset + .5) return "сумерки";
     if (h > solar.sunset - 2.2) return "вечерняя кромка";
     return "дневное окно";
   }
-  function clockLabel(decimal) { const minutes = Math.round(Number(decimal || 0) * 60); const hours = Math.floor(minutes / 60) % 24; return String(hours).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0"); }
+  function clockLabel(decimal) { if (!Number.isFinite(decimal)) return "—"; const minutes = Math.round(decimal * 60); const hours = Math.floor(minutes / 60) % 24; return String(hours).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0"); }
   function windDetail(c) {
+    if (!Number.isFinite(c.wind)) return "Свежий ветер недоступен — проверьте прогноз перед выездом";
+    if (c.gusts >= 15 || [95,96,99].includes(c.code)) return "Опасные порывы или гроза: отложите выход к воде";
     if (c.wind < 1.5) return "штиль: рябь слабая, ищите активность на мелководье";
     if (c.wind <= 7) return "умеренная рябь: корм сносит к наветренной кромке";
     if (c.wind <= 11) return "ветрено: кромка перспективна, но выходите осторожно";
     return "сильный ветер: комфорт и безопасность важнее дальнего заброса";
   }
   function pressureDetail(c) {
+    if (!Number.isFinite(c.pressure)) return "Нет свежих данных давления";
     if (c.pressureTrend > 1) return "растёт · часто короткое активное окно";
     if (c.pressureTrend < -3) return "заметно падает · клёв может быть рваным";
     if (c.pressure >= 1005 && c.pressure <= 1025) return "в рабочем диапазоне · без резкого скачка";
@@ -397,7 +426,7 @@
       { icon: "↕", label: "Давление", value: fmt(c.pressure, 0) + " гПа", detail: pressureDetail(c), tone: c.pressureTrend > 1 || (c.pressure >= 1005 && c.pressure <= 1025) ? "good" : c.pressureTrend < -3 ? "warn" : "neutral" },
       { icon: weatherIcon(c.code, c.isDay), label: "Небо и дождь", value: fmt(c.cloud, 0) + "% облаков", detail: c.rainProb > 50 ? "осадки вероятны · нужен запасной план" : weatherCodeText(c.code) + " · осадки " + fmt(c.rainProb, 0) + "%", tone: c.rainProb > 65 ? "warn" : c.cloud >= 25 && c.cloud <= 80 ? "good" : "neutral" },
       { icon: "☼", label: "Световой ритм", value: lightPhase(date), detail: "рассвет " + clockLabel(solar.sunrise) + " · закат " + clockLabel(solar.sunset), tone: dayPhaseScore(date) > .7 ? "good" : "neutral" },
-      { icon: "☾", label: "Лунный фон", value: moonPhaseName(date), detail: "ритмический бонус модели " + Math.round(moonScore(date) * 100) + "/100", tone: moonScore(date) > .65 ? "good" : "neutral" },
+      { icon: "☾", label: "Лунный фон", value: moonPhaseName(date), detail: "Справочно: не повышает индекс и не предсказывает улов", tone: "neutral" },
       { icon: "°", label: "Ощущается", value: fmt(c.apparent, 0) + "° · " + fmt(c.humidity, 0) + "%", detail: "влажность · осадков сейчас " + fmt(c.precipitation, 1) + " мм", tone: c.humidity >= 45 && c.humidity <= 90 ? "neutral" : "warn" },
       { icon: "⌁", label: "Рельеф и корм", value: l.depthLabel, detail: l.hotspots.length + " сценария для старта · " + l.depthConfidence.toLowerCase() + " уверенность", tone: l.depthConfidence.toLowerCase().includes("средняя") ? "good" : "neutral" }
     ];
@@ -408,66 +437,83 @@
     if (dayPhaseScore(date) > .7) reasons.push(lightPhase(date) + " совпадает с суточным ритмом");
     if (c.rainProb > 65) reasons.push("осадки могут быстро изменить активность и видимость приманки");
     if (!reasons.length) reasons.push("условия ровные: рельеф и точность проводки важнее самой цифры");
-    const best = l.hotspots.map((spot) => ({ spot, score: scoreAt(date, settings.fish, spot) })).sort((a, b) => b.score - a.score)[0];
-    $("conditionsUpdated").textContent = weather ? "Open‑Meteo · сейчас" : "локальный сценарий";
+    const best = rankedHotspots()[0];
+    $("conditionsUpdated").textContent = weatherUsable() ? "Open‑Meteo · " + (weatherError ? "сохранённый прогноз" : "прогноз") : "нет свежей погоды";
     $("conditionsSummaryTitle").textContent = scoreLabel(score) + " · цель: " + target;
-    $("conditionsNarrative").textContent = reasons.slice(0, 3).join("; ") + ".";
+    $("conditionsNarrative").textContent = score == null ? "Нет свежей погоды: индекс не рассчитан. Статические поисковые точки доступны, но актуальность условий неизвестна." : reasons.slice(0, 3).join("; ") + ". Это предположения модели, а не проверенные причинные связи с клёвом.";
+    if (!weatherUsable()) $("conditionCards").innerHTML = `<article class="condition-card"><strong>Нет свежего прогноза</strong><p>Никакие температура, ветер и давление не подставляются вместо данных. Обновите прогноз при появлении сети.</p></article>`;
     $("conditionsAction").textContent = best ? "Стартовый план: " + best.spot.name + " (" + best.spot.depth + ") · " + best.spot.reason + ". Сделайте 3–5 забросов и промер перед сменой точки." : "Стартовый план: найдите первый перепад глубины и проверьте его промером.";
   }
   function renderFishGuide() {
     const l = lake(); const keys = l.fishKinds || []; const target = settings.fish; const date = new Date();
-    const cards = keys.map((kind) => { const guide = fishGuide[kind]; if (!guide) return ""; const best = l.hotspots.map((spot) => scoreAt(date, kind, spot)).sort((a, b) => b - a)[0] || scoreAt(date, kind); return `<button class="fish-card ${target === kind ? "is-target" : ""}" type="button" data-fish-target="${kind}" aria-pressed="${String(target === kind)}"><div class="fish-card-head"><span class="fish-icon">${guide.icon}</span><span><strong>${escapeHtml(guide.label)}</strong><small>${escapeHtml(guide.tag)}</small></span><b>${best}</b></div><p class="fish-where"><span>Где</span>${escapeHtml(guide.where)} · ${escapeHtml(guide.depth)}</p><p class="fish-when"><span>Когда</span>${escapeHtml(guide.when)}</p><p class="fish-tactic"><span>Как</span>${escapeHtml(guide.tactic)}</p><p class="fish-why">${escapeHtml(guide.why)}</p><small class="fish-confidence">${escapeHtml(guide.confidence)} · нажмите, чтобы выбрать целью</small></button>`; }).filter(Boolean).join("");
+    const cards = keys.map((kind) => { const guide = Object.assign({}, fishGuide[kind], l.fishGuide?.[kind]); if (!guide.label) return ""; const best = rankedHotspots(kind)[0]?.score ?? scoreAt(date, kind); return `<button class="fish-card ${target === kind ? "is-target" : ""}" type="button" data-fish-target="${kind}" aria-pressed="${String(target === kind)}"><div class="fish-card-head"><span class="fish-icon">${guide.icon}</span><span><strong>${escapeHtml(guide.label)}</strong><small>${escapeHtml(guide.tag)}</small></span><b>${best ?? "—"}</b></div><p class="fish-where"><span>Где</span>${escapeHtml(guide.where)} · ${escapeHtml(guide.depth)}</p><p class="fish-when"><span>Когда</span>${escapeHtml(guide.when)}</p><p class="fish-tactic"><span>Как</span>${escapeHtml(guide.tactic)}</p><p class="fish-why">${escapeHtml(guide.why)}</p><small class="fish-confidence">${escapeHtml(guide.confidence)} · нажмите, чтобы выбрать целью</small></button>`; }).filter(Boolean).join("");
     $("fishGuide").innerHTML = cards || `<p class="section-lead">Для этого водоёма пока нет карточек видов.</p>`;
     $("fishLakeNote").textContent = "" + keys.length + " ориентиров · уточняйте уловы и правила";
     qsa("[data-fish-target]").forEach((button) => button.addEventListener("click", () => { settings.fish = button.dataset.fishTarget; writeJson(SETTINGS_KEY, settings); renderAll(); showToast("Цель: " + fishLabel(settings.fish), 1600); }));
   }
   function bestWindows(count = 3) {
+    if (!weatherUsable()) return [];
     const candidates = [];
-    for (let d = 0; d < 2; d++) for (let h = 4; h <= 23; h++) { const date = new Date(); date.setDate(date.getDate() + d); date.setHours(h, 0, 0, 0); const score = scoreAt(date); candidates.push({ date, score }); }
+    weather.hourly.time.forEach(time => { const date = new Date(forecastTime(time)); const h = moscowHour(date); if (date.getTime() <= Date.now() || h < 5 || h > 21 || date.getTime() + 3600000 > forecastTime(weather.hourly.time.at(-1))) return; candidates.push({ date, score: scoreAt(date) }); });
+    candidates.splice(0, candidates.length, ...candidates.filter(x => x.score != null));
     candidates.sort((a,b) => b.score - a.score); const picked = [];
     candidates.forEach((item) => { if (picked.length >= count) return; if (!picked.some((x) => Math.abs(x.date - item.date) < 3 * 3600000)) picked.push(item); });
-    return picked.map((x) => ({ score: x.score, label: formatWindow(x.date), reason: x.date.getHours() < 11 ? "утреннее окно · первый свал" : x.date.getHours() > 17 ? "вечернее окно · кромка" : "дневное окно · течение" }));
+    return picked.map((x) => ({ score: x.score, label: formatWindow(x.date), reason: moscowHour(x.date) < 11 ? "утреннее окно · поиск доступной кромки" : moscowHour(x.date) > 17 ? "вечернее окно · только безопасный знакомый берег" : "дневное окно · поиск активной рыбы" }));
   }
-  function formatWindow(date) { const day = date.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "short" }); return day + " · " + String(date.getHours()).padStart(2,"0") + ":00–" + String((date.getHours() + 2) % 24).padStart(2,"0") + ":00"; }
+  function formatWindow(date) { const day = date.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow", weekday: "short", day: "numeric", month: "short" }); return day + " · " + String(moscowHour(date)).padStart(2,"0") + ":00–" + String((moscowHour(date) + 2) % 24).padStart(2,"0") + ":00 МСК"; }
 
   function renderCompare() {
-    const scored = lakeKeys.map((key) => { const old = selectedLake; const oldWeather = weather; selectedLake = key; weather = weatherCache[key]?.data || (key === old ? oldWeather : null); const s = scoreAt(new Date()); const conf = confidence(); const l = lakes[key]; selectedLake = old; weather = oldWeather; return { key, score: s, confidence: conf, lake: l }; }).sort((a,b) => b.score - a.score);
-    $("compareList").innerHTML = scored.map((item, index) => `<article class="compare-row ${index === 0 ? "is-best" : ""}"><div class="compare-row-head"><span class="lake-tab-dot dot-${item.key}"></span><strong>${escapeHtml(item.lake.name)}</strong></div><div class="compare-row-score"><strong>${item.score}</strong><span>${index === 0 ? "лучший шанс" : scoreLabel(item.score)}</span></div><div class="compare-bar"><i style="width:${item.score}%"></i></div><small>${escapeHtml(item.lake.depthLabel)} · ${item.confidence}% уверенность</small></article>`).join("");
-    const weatherCount = lakeKeys.filter((key) => key === selectedLake ? !!weather : !!weatherCache[key]?.data).length;
-    $("compareUpdated").textContent = weatherCount ? "погода · " + weatherCount + "/3 точек" : "локальная оценка";
-    qsa("[data-mini-score]").forEach((el) => { const item = scored.find((x) => x.key === el.dataset.miniScore); el.textContent = item ? item.score : "—"; });
+    const scored = lakeKeys.map(key => {
+      const old = selectedLake, oldWeather = weather;
+      selectedLake = key; weather = weatherCache[key]?.data || (key === old ? oldWeather : null);
+      const supported = settings.fish === "universal" || lakes[key].fishKinds.includes(settings.fish);
+      const score = supported ? scoreAt(new Date()) : null;
+      selectedLake = old; weather = oldWeather;
+      return { key, score, supported, lake:lakes[key] };
+    }).sort((a,b) => (b.score ?? -1) - (a.score ?? -1));
+    $("compareList").innerHTML = scored.map(item => `<article class="compare-row"><div class="compare-row-head"><span class="lake-tab-dot dot-${item.key}"></span><strong>${escapeHtml(item.lake.name)}</strong></div><div class="compare-row-score"><strong>${item.score ?? "—"}</strong><span>${item.supported ? scoreLabel(item.score) : "вид не подтверждён"}</span></div><div class="compare-bar"><i style="width:${item.score ?? 0}%"></i></div><small>Погодный индекс · не рейтинг уловистости</small></article>`).join("");
+    const count = scored.filter(x => x.score != null).length;
+    $("compareUpdated").textContent = "свежий индекс: " + count + "/" + lakeKeys.length;
+    qsa("[data-mini-score]").forEach(el => { el.textContent = scored.find(x => x.key === el.dataset.miniScore)?.score ?? "—"; });
   }
 
   function renderForecast() {
     const l = lake(); const c = currentConditions(); const score = scoreAt(new Date());
-    $("forecastIntro").textContent = "Почасовая оценка для " + l.name + "."; $("forecastScore").textContent = score; $("forecastScoreText").textContent = scoreLabel(score); $("forecastTemp").textContent = fmt(c.temperature, 0) + "°"; $("forecastWeatherText").textContent = weatherCodeText(c.code); $("forecastWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа"; $("forecastConfidence").textContent = "уверенность " + confidence() + "%";
+    $("forecastIntro").textContent = "Почасовая оценка для " + l.name + "."; $("forecastScore").textContent = score ?? "—"; $("forecastScoreText").textContent = scoreLabel(score); $("forecastTemp").textContent = fmt(c.temperature, 0) + "°"; $("forecastWeatherText").textContent = weatherCodeText(c.code); $("forecastWeatherMeta").textContent = fmt(c.wind, 0) + " м/с · " + fmt(c.pressure, 0) + " гПа"; $("forecastConfidence").textContent = confidence();
     const stats = [{ label: "ветер", value: fmt(c.wind, 0) + " м/с", note: directionName(c.direction) }, { label: "давление", value: fmt(c.pressure, 0) + " гПа", note: c.pressureTrend > 1 ? "растёт" : c.pressureTrend < -1 ? "падает" : "ровно" }, { label: "облачность", value: fmt(c.cloud, 0) + "%", note: c.cloud > 70 ? "много облаков" : "светлое небо" }, { label: "осадки", value: fmt(c.rainProb, 0) + "%", note: c.rainProb > 50 ? "возьмите дождевик" : "низкая вероятность" }, { label: "ощущается", value: fmt(c.apparent, 0) + "°", note: "влажность " + fmt(c.humidity, 0) + "%" }, { label: "осадков сейчас", value: fmt(c.precipitation, 1) + " мм", note: "по текущему часу" }];
     $("weatherStrip").innerHTML = stats.map((x) => `<div class="weather-stat"><span>${x.label}</span><strong>${x.value}</strong><small>${x.note}</small></div>`).join("");
-    const hours = hourlyItems(); $("hourlyForecast").innerHTML = hours.map((x) => `<div class="hour-card ${x.best ? "is-best" : ""}"><time>${x.label}</time><span class="hour-icon">${weatherIcon(x.code, x.isDay)}</span><span class="hour-temp">${fmt(x.temp,0)}°</span><span class="hour-score">${x.score}</span><span class="hour-score-bar"><i style="width:${x.score}%"></i></span></div>`).join("");
+    if (!weatherUsable()) $("weatherStrip").innerHTML = "";
+    const hours = hourlyItems(); $("hourlyForecast").innerHTML = hours.map((x) => `<div class="hour-card ${x.best ? "is-best" : ""}"><time>${x.label}</time><span class="hour-icon">${weatherIcon(x.code, x.isDay)}</span><span class="hour-temp">${fmt(x.temp,0)}°</span><span class="hour-score">${x.score ?? "—"}</span><span class="hour-score-bar"><i style="width:${x.score ?? 0}%"></i></span></div>`).join("");
     $("bestTimesList").innerHTML = bestWindows(3).map((x, i) => `<div class="best-time"><span class="best-time-rank">0${i + 1}</span><div><strong>${x.label}</strong><small>${x.reason}</small></div><b class="best-time-score">${x.score}</b></div>`).join("");
     renderForecastDetails(c, score);
   }
   function renderForecastDetails(c, score) {
-    const date = new Date(); const l = lake(); const solar = solarHours(date); const fish = fishLabel(settings.fish); const targetGuide = settings.fish !== "universal" ? fishGuide[settings.fish] : null;
+    const date = new Date(); const l = lake(); const solar = solarHours(date); const fish = fishLabel(settings.fish); const targetGuide = settings.fish !== "universal" ? Object.assign({}, fishGuide[settings.fish], l.fishGuide?.[settings.fish]) : null;
     const factors = [
       { label: "Световой ритм", value: Math.round(dayPhaseScore(date) * 100) + "/100", detail: lightPhase(date) + " · рассвет/закат задают основной пик", tone: dayPhaseScore(date) > .7 ? "good" : "neutral" },
       { label: "Ветер и рябь", value: fmt(c.wind, 0) + " м/с", detail: windDetail(c), tone: c.wind >= 1.5 && c.wind <= 7 ? "good" : c.wind > 10 ? "warn" : "neutral" },
       { label: "Давление", value: fmt(c.pressure, 0) + " гПа", detail: pressureDetail(c), tone: c.pressureTrend < -3 ? "warn" : "good" },
       { label: "Небо и осадки", value: fmt(c.cloud, 0) + "% / " + fmt(c.rainProb, 0) + "%", detail: weatherCodeText(c.code) + " · " + (c.rainProb > 50 ? "держите запасной берег" : "видимость приманки обычно комфортная"), tone: c.rainProb > 65 ? "warn" : "neutral" },
       { label: "Целевая рыба", value: fish, detail: targetGuide ? targetGuide.when + ". " + targetGuide.why : "выберите вид выше, чтобы усилить профиль условий", tone: targetGuide ? "good" : "neutral" },
-      { label: "Локальная поправка", value: "+" + Math.min(8, journal.filter((entry) => entry.lake === selectedLake && entry.type === "catch").length * 1.5).toFixed(1), detail: "реальные уловы из журнала; сохраняются только на этом устройстве", tone: "neutral" }
+      { label: "Достоверность", value: "не обучена на уловах", detail: "Нет датчика рыбы, температуры воды и подтверждения жора. Количество записей в журнале не повышает индекс.", tone: "neutral" }
     ];
     $("forecastFactors").innerHTML = factors.map((x) => `<article class="factor-row tone-${x.tone}"><div><strong>${escapeHtml(x.label)}</strong><p>${escapeHtml(x.detail)}</p></div><b>${escapeHtml(x.value)}</b></article>`).join("");
     $("forecastDecision").textContent = scoreLabel(score) + " · " + fish;
-    $("forecastDetailNote").textContent = "Модель учитывает рассвет " + clockLabel(solar.sunrise) + ", закат " + clockLabel(solar.sunset) + ", лунный фон и рельеф " + l.depthLabel.toLowerCase() + ". На воде подтвердите точку эхолотом или промером.";
+    $("forecastDetailNote").textContent = "Индекс 0–100 — эвристика погоды и времени, не процент вероятности улова. Температура — воздух, не вода. Рассвет " + clockLabel(solar.sunrise) + ", закат " + clockLabel(solar.sunset) + " МСК. Луна и число записей не дают бонуса.";
+    if (!weatherUsable()) $("forecastFactors").innerHTML = "<p>Факторы недоступны без свежей погоды. Тактика и источники остаются в плане выезда.</p>";
   }
   function hourlyItems() {
-    const out = []; const base = new Date(); base.setMinutes(0,0,0); const candidates = [];
-    for (let i = 0; i < 12; i++) { const date = new Date(base.getTime() + i * 3600000); const c = conditionsAt(date); candidates.push({ date, c, score: scoreAt(date) }); }
-    const max = Math.max(...candidates.map((x) => x.score));
-    candidates.forEach((x) => out.push({ label: x.date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }), temp: x.c.temperature, code: x.c.code, isDay: x.c.isDay, score: x.score, best: x.score === max })); return out;
+    if (!weatherUsable()) return [];
+    const base = Math.floor(Date.now()/3600000)*3600000;
+    const items = weather.hourly.time.map(time => new Date(forecastTime(time))).filter(date => date.getTime() >= base).slice(0,12).map(date => {
+      const c = conditionsAt(date);
+      return { label:date.toLocaleString("ru-RU",{timeZone:"Europe/Moscow",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}),temp:c.temperature,code:c.code,isDay:c.isDay,score:scoreAt(date) };
+    });
+    const max = Math.max(...items.map(x=>x.score ?? -1));
+    return items.map(x=>({...x,best:x.score != null && x.score === max}));
   }
-  function directionName(deg) { const dirs = ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]; return dirs[Math.round((deg || 0) / 45) % 8]; }
+
+  function directionName(deg) { if (!Number.isFinite(deg)) return "—"; const dirs = ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]; return dirs[Math.round((deg || 0) / 45) % 8]; }
 
   function renderJournal() {
     const entries = journal.slice().sort((a,b) => b.created - a.created); const lakeEntries = entries.filter((e) => e.lake === selectedLake);
@@ -488,6 +534,28 @@
   function exportJson() { exportBlob(JSON.stringify({ exportedAt: new Date().toISOString(), entries: journal }, null, 2), "klev-ryadom-journal.json", "application/json"); showToast("JSON подготовлен", 1600); }
   function exportCsv() { const rows = [["дата","озеро","тип","широта","долгота","глубина_м","рыба","заметка"], ...journal.map((e) => [new Date(e.created).toISOString(), lakes[e.lake]?.name || e.lake, e.type, e.lat, e.lon, e.depth ?? "", e.fish || "", e.note || ""])]; exportBlob("\ufeff" + rows.map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(",")).join("\n"), "klev-ryadom-journal.csv", "text/csv;charset=utf-8"); showToast("CSV подготовлен", 1600); }
 
+  function mapLinks(lat, lon) {
+    const ll = Number(lat).toFixed(6) + "," + Number(lon).toFixed(6);
+    return `<div class="trip-links"><a target="_blank" rel="noreferrer" href="https://yandex.ru/maps/?pt=${lon},${lat}&z=16&l=map">Яндекс · точка ↗</a><a target="_blank" rel="noreferrer" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(ll)}">Маршрут ↗</a><small>${ll}</small></div>`;
+  }
+  function renderExpedition() {
+    const el = $("expeditionSection"), trip = lake().expedition;
+    el.hidden = !trip; $("tripJump").hidden = !trip;
+    if (!trip) return;
+    const first = bestWindows(1)[0], c = currentConditions(), today = moscowDay();
+    el.innerHTML = `<div class="section-heading"><div><p class="eyebrow">БЕРЕГ · ВАШИ СНАСТИ</p><h2 id="tripHeading">${escapeHtml(trip.title)}</h2></div><span class="muted-label">Разбор ${trip.checked}</span></div>
+      <div class="trip-verdict"><span class="trip-badge">МОЙ ВЫБОР</span><p>${escapeHtml(trip.verdict)}</p><p class="trip-caveat">${escapeHtml(trip.caveat)}</p></div>
+      <div class="trip-live"><strong>Ближайшее погодное окно · МСК</strong><p>${first ? escapeHtml(first.label) + " · индекс " + first.score + "/100" : "Нет свежего будущего окна: обновите прогноз."}</p><small>Воздух ${fmt(c.temperature,1)} °C · ветер ${fmt(c.wind,1)} м/с · порывы ${fmt(c.gusts,1)} м/с. Это прогноз, не датчик рыбы или воды.</small></div>
+      <h3>Куда приехать</h3>
+      ${trip.access.map(p => `<article class="trip-access"><strong>${escapeHtml(p.name)}</strong><p>${escapeHtml(p.note)}</p>${mapLinks(p.lat,p.lon)}</article>`).join("")}
+      <h3>Расписание выезда · датированный план</h3><p class="trip-muted">Снимок прогноза на 14–15 сентября, не обновляется задним числом. Актуальные условия — в блоке выше.</p>
+      <div class="trip-sessions">${trip.sessions.map(p => `<article class="${p.date < today ? "is-past" : ""}"><small>${p.date < today ? "АРХИВ · " : ""}${escapeHtml(p.title)}</small><strong>${escapeHtml(p.time)}</strong><p>${escapeHtml(p.text)}</p></article>`).join("")}</div>
+      <details open class="trip-detail"><summary>Тактика: что делать по шагам</summary><div>${trip.tactics.map(p => `<article><h4>${escapeHtml(p[0])}</h4><p>${escapeHtml(p[1])}</p></article>`).join("")}</div></details>
+      <details class="trip-detail"><summary>Точки под выбранную рыбу · ${escapeHtml(fishLabel(settings.fish))}</summary><div>${rankedHotspots().map(({spot},i) => `<article><h4>${i+1}. ${escapeHtml(spot.name)}</h4><p>${escapeHtml(spot.reason)}. ${escapeHtml(spot.depth)}. Метка — сектор воды, не место парковки и не подтверждённая стоянка рыбы.</p><button type="button" class="button button-ghost" data-trip-point="${spot.id}">Показать на карте ↑</button>${mapLinks(spot.lat,spot.lon)}</article>`).join("")}</div></details>
+      <details class="trip-detail"><summary>Почему это озеро, а не ближе</summary><div>${trip.alternatives.map(p => `<article><h4>${escapeHtml(p[0])} · ${escapeHtml(p[1])}</h4><p>${escapeHtml(p[2])}</p></article>`).join("")}<p class="trip-muted">Расстояния по прямой, не километраж дороги. Сравнение качественное, одинаковой статистики береговых уловов нет.</p></div></details>
+      <details class="trip-detail"><summary>Источники и ограничения · ${trip.sources.length}</summary><div>${trip.sources.map(p => `<article><a href="${escapeHtml(p.href)}" target="_blank" rel="noreferrer">${escapeHtml(p.label)} ↗</a><p>${escapeHtml(p.note)}</p></article>`).join("")}</div></details>`;
+    qsa("[data-trip-point]").forEach(button => button.addEventListener("click", () => { focusHotspot(button.dataset.tripPoint); qs(".map-card").scrollIntoView({behavior:"smooth",block:"start"}); }));
+  }
   function renderSources() { $("sourcesList").innerHTML = window.APP_SOURCES.map((x) => `<div class="source-row"><div><strong>${escapeHtml(x.label)}</strong><small>${escapeHtml(x.text)}</small></div><a href="${x.href}" target="_blank" rel="noreferrer" aria-label="Открыть источник">↗</a></div>`).join(""); }
 
   async function copyCoordinates() {
@@ -511,7 +579,7 @@
 
   function updateZoomUi() {
     const reset = $("zoomReset"); if (!reset) return;
-    if (viewMode === "hybrid" && leafletMap) { const z = leafletMap.getZoom(); reset.textContent = z.toFixed(1) + "×"; $("zoomOut").disabled = z <= 9; $("zoomIn").disabled = z >= 19; return; }
+    if (viewMode === "hybrid" && leafletMap) { const z = leafletMap.getZoom(); reset.textContent = "Обзор"; $("zoomOut").disabled = z <= 9; $("zoomIn").disabled = z >= 19; return; }
     reset.textContent = (mapState.scale <= 1.01 ? "1" : mapState.scale.toFixed(1)) + "×";
     $("zoomOut").disabled = mapState.scale <= 1.01;
     $("zoomIn").disabled = mapState.scale >= 3.99;
@@ -538,12 +606,15 @@
     const y = height - pad - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat || 1) * (height - pad * 2); return { x, y };
   }
   function mapBounds() { const points = lake().geometry.concat(selectedLake === "sukhodol" ? window.BURNAYA_PATH : []); return { minLat: Math.min(...points.map((p) => p[0])), maxLat: Math.max(...points.map((p) => p[0])), minLon: Math.min(...points.map((p) => p[1])), maxLon: Math.max(...points.map((p) => p[1])) }; }
-  function resizeCanvas() { const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ratio = Math.min(window.devicePixelRatio || 1, 2); const w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio); canvas.dataset.pixelRatio = String(ratio); if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } if (viewMode === "hybrid") { resizeLeafletMap(); return; } drawMap(); }
+  function resizeCanvas() { if (viewMode === "hybrid") { resizeLeafletMap(); return; } const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ratio = Math.min(window.devicePixelRatio || 1, 2); const w = Math.round(canvas.clientWidth * ratio), h = Math.round(canvas.clientHeight * ratio); canvas.dataset.pixelRatio = String(ratio); if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } drawMap(); }
   function ensureLeafletMap() {
     if (leafletMap || !window.L || !$("leafletMap")) return leafletMap;
-    leafletMap = window.L.map("leafletMap", { zoomControl: true, attributionControl: true, preferCanvas: true, zoomSnap: .25, zoomDelta: .5, minZoom: 9, maxZoom: 19, inertia: true, tap: false });
+    leafletMap = window.L.map("leafletMap", { zoomControl: false, touchZoom: true, attributionControl: true, preferCanvas: true, zoomSnap: .25, zoomDelta: .5, minZoom: 9, maxZoom: 19, inertia: true, tap: false });
     leafletBaseLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles © Esri" });
     leafletBaseLayer.addTo(leafletMap);
+    window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom:19, attribution:"Labels © Esri" }).addTo(leafletMap);
+    window.L.control.scale({ imperial:false, position:"bottomleft" }).addTo(leafletMap);
+    leafletMap.on("click", event => { if (pointInWater([event.latlng.lat,event.latlng.lng])) openPointModal({lat:event.latlng.lat,lon:event.latlng.lng}); });
     leafletMap.on("zoomend moveend", () => { renderLeafletOverlays(); updateZoomUi(); });
     return leafletMap;
   }
@@ -562,7 +633,7 @@
   function renderLeafletOverlays() {
     if (!leafletMap || viewMode !== "hybrid") return;
     clearLeafletLayers(); const l = lake(); const levels = depthVisible ? (l.contourLevels || []).map(Number).filter(Number.isFinite) : []; const coords = l.geometry.map((p) => [p[0], p[1]]);
-    const boundary = window.L.polygon(coords, { color: "#a5efd0", weight: 2, opacity: .88, fillColor: "#4fb89d", fillOpacity: .16, interactive: false }).addTo(leafletMap); leafletLayers.push(boundary);
+    const boundary = window.L.polygon([coords, ...(l.holes || [])], { color: "#a5efd0", weight: 2, opacity: .88, fillColor: "#4fb89d", fillOpacity: .16, interactive: false }).addTo(leafletMap); leafletLayers.push(boundary);
     levels.forEach((level, index) => {
       const fraction = clamp(.16 + .74 * (level / Math.max(...levels, 1)), .16, .94); const center = l.geometry.reduce((a, p) => [a[0] + p[0] / l.geometry.length, a[1] + p[1] / l.geometry.length], [0, 0]); const ring = l.geometry.map((p) => [center[0] + (p[0] - center[0]) * fraction, center[1] + (p[1] - center[1]) * fraction]);
       const contour = window.L.polyline(ring, { color: index === levels.length - 1 ? "#b8f5db" : "#d5f4e7", weight: 1, opacity: .58, interactive: false }).addTo(leafletMap); leafletLayers.push(contour);
@@ -571,15 +642,27 @@
     if (selectedLake === "sukhodol") { const river = window.L.polyline(window.BURNAYA_PATH.map((p) => [p[0], p[1]]), { color: "#f3d889", weight: 3, dashArray: "7 5", opacity: .9, interactive: false }).addTo(leafletMap); leafletLayers.push(river); }
     if (zonesVisible) {
       const ranked = rankedHotspots(settings.fish); const rankById = new Map(ranked.map((item, index) => [item.spot.id, { ...item, rank: index + 1 }]));
-      (l.hotspots || []).forEach((spot) => { const item = rankById.get(spot.id); const rank = item?.rank || 99; const selected = settings.fish !== "universal"; const top = rank <= 3; const marker = window.L.circleMarker([spot.lat, spot.lon], { radius: selected && top ? 9 : 6, color: selected && top ? "#f3d889" : "#e4cd7d", weight: selected && rank === 1 ? 3 : 1.5, fillColor: "#f3d889", fillOpacity: selected && top ? .72 : .35, interactive: true }).addTo(leafletMap); marker.bindTooltip(`${selected ? rank + ". " : ""}${escapeHtml(spot.name)} · ${escapeHtml(spot.depth)}`, { direction: "top", opacity: .92 }); marker.on("click", () => showMapToast(spot.name + " · " + spot.depth + " · " + spot.species + " · шанс " + scoreAt(new Date(), settings.fish, spot))); leafletLayers.push(marker); });
+      ranked.forEach(({spot}) => { const item = rankById.get(spot.id); const rank = item?.rank || 99; const selected = settings.fish !== "universal"; const top = rank <= 3; const marker = window.L.circleMarker([spot.lat, spot.lon], { radius: selected && top ? 9 : 6, color: selected && top ? "#f3d889" : "#e4cd7d", weight: selected && rank === 1 ? 3 : 1.5, fillColor: "#f3d889", fillOpacity: selected && top ? .72 : .35, interactive: true, bubblingMouseEvents:false }).addTo(leafletMap); marker.bindTooltip(`${selected ? rank + ". " : ""}${escapeHtml(spot.name)} · ${escapeHtml(spot.depth)}`, { direction: "top", opacity: .92 }); marker.on("click", event => { window.L.DomEvent.stopPropagation(event); showMapToast(spot.name + " · " + spot.depth + " · " + spot.species + " · поисковая гипотеза"); }); leafletLayers.push(marker); });
     }
   }
   function syncMapSurface() {
-    const canvas = $("lakeCanvas"); const surface = $("leafletMap"); const hybrid = viewMode === "hybrid";
+    const canvas = $("lakeCanvas"), surface = $("leafletMap"), hybrid = viewMode === "hybrid";
     canvas.hidden = hybrid; surface.hidden = !hybrid;
-    if (hybrid) { const map = ensureLeafletMap(); if (!map) { loadLeafletLibrary().then(() => { if (viewMode === "hybrid") syncMapSurface(); }).catch(() => { canvas.hidden = false; surface.hidden = true; showToast("Гибридный слой недоступен — показываю офлайн-карту", 2600); drawMap(); }); return; } const l = lake(); const bounds = window.L.latLngBounds(l.geometry.map((p) => [p[0], p[1]])); const sameLake = map._klevLakeKey === selectedLake; map._klevLakeKey = selectedLake; if (!sameLake) map.fitBounds(bounds.pad(.08), { animate: false }); setTimeout(() => { map.invalidateSize({ pan: false }); renderLeafletOverlays(); updateZoomUi(); }, 0); }
-    else { drawMap(); }
+    if (!hybrid) { resizeCanvas(); return; }
+    const map = ensureLeafletMap();
+    if (!map) {
+      loadLeafletLibrary().then(() => { if (viewMode === "hybrid") syncMapSurface(); }).catch(() => { setMode("2d"); showToast("Сеть/гибрид недоступны — схема берега без спутника"); });
+      return;
+    }
+    const l = lake(), sameLake = map._klevLakeKey === selectedLake;
+    map._klevLakeKey = selectedLake;
+    if (!sameLake) {
+      if (l.expedition) map.setView(l.focus, 13, {animate:false});
+      else map.fitBounds(window.L.latLngBounds(l.geometry).pad(.08), {animate:false});
+    }
+    setTimeout(() => { map.invalidateSize({pan:false}); renderLeafletOverlays(); updateZoomUi(); }, 0);
   }
+
   function drawMap() {
     const canvas = $("lakeCanvas"); if (!canvas || !canvas.clientWidth) return; const ctx = canvas.getContext("2d"); const ratio = Number(canvas.dataset.pixelRatio || 1); const w = canvas.clientWidth, h = canvas.clientHeight; constrainMapPan(w, h); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h); const bounds = mapBounds();
     drawMapBackground(ctx,w,h); const base = lake().geometry.map((p) => projectPoint(p[0],p[1],w,h,bounds,34)); drawLand(ctx,w,h,bounds);
@@ -640,17 +723,17 @@
   function drawRiver(ctx,bounds) { const w=ctx.canvas.clientWidth||ctx.canvas.width, h=ctx.canvas.clientHeight||ctx.canvas.height; const path=window.BURNAYA_PATH.map((p)=>projectPoint(p[0],p[1],w,h,bounds,34)); ctx.save();ctx.strokeStyle="#f3d889";ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([7,5]);ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle="#f3d889";ctx.font="11px -apple-system, sans-serif";const mid=path[Math.floor(path.length/2)];ctx.fillText("р. Бурная · проверьте правила",mid.x+8,mid.y-8);ctx.restore(); }
   function drawHotspots(ctx,bounds) {
     const w = ctx.canvas.clientWidth || ctx.canvas.width, h = ctx.canvas.clientHeight || ctx.canvas.height; const ranked = rankedHotspots(settings.fish); const rankById = new Map(ranked.map((item, index) => [item.spot.id, { ...item, rank: index + 1 }]));
-    ctx.save(); (lake().hotspots || []).forEach((spot) => {
+    ctx.save(); ranked.forEach(({spot}) => {
       const item = rankById.get(spot.id); const p = projectPoint(spot.lat, spot.lon, w, h, bounds, 34); const rank = item?.rank || 99; const score = item?.score || scoreAt(new Date(), settings.fish, spot); const selected = settings.fish !== "universal"; const isTop = rank <= 3; const r = Math.max(selected ? (isTop ? 22 : 14) : 16, w / (selected && isTop ? 42 : 52));
       ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fillStyle = selected && isTop ? (rank === 1 ? "rgba(243,216,137,.3)" : "rgba(243,216,137,.17)") : "rgba(243,216,137,.12)"; ctx.fill(); ctx.strokeStyle = selected && isTop ? "rgba(243,216,137,.95)" : "rgba(243,216,137,.48)"; ctx.setLineDash(selected && isTop ? [] : [3, 3]); ctx.lineWidth = selected && rank === 1 ? 2.2 : 1.2; ctx.stroke(); ctx.setLineDash([]);
       ctx.beginPath(); ctx.arc(p.x, p.y, selected && isTop ? 6 : 4, 0, Math.PI * 2); ctx.fillStyle = selected && rank === 1 ? "#fff0a8" : "#f3d889"; ctx.fill();
       if (selected && isTop) { ctx.font = `700 ${Math.max(10, Math.min(13, w / 75)).toFixed(1)}px -apple-system, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#07181d"; ctx.fillText(String(rank), p.x, p.y + .5); }
-      if (selected ? isTop : (rank === 1 || w > 650)) { const label = selected ? `${rank}. ${spot.name} · ${score}` : `${spot.name} · ${score}`; ctx.font = "600 10px -apple-system, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; const lx = clamp(p.x + r + 5, 6, w - Math.min(185, w * .48)); const ly = clamp(p.y, 15, h - 15); const tw = ctx.measureText(label).width + 10; roundedRectPath(ctx, lx - 4, ly - 9, tw, 18, 4); ctx.fillStyle = "rgba(3,18,23,.86)"; ctx.fill(); ctx.fillStyle = "#effff7"; ctx.fillText(label, lx + 1, ly + .5); }
+      if (selected ? isTop : (rank === 1 || w > 650)) { const label = selected ? `${rank}. ${spot.name} · ${score ?? "—"}` : `${spot.name} · ${score ?? "—"}`; ctx.font = "600 10px -apple-system, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; const lx = clamp(p.x + r + 5, 6, w - Math.min(185, w * .48)); const ly = clamp(p.y, 15, h - 15); const tw = ctx.measureText(label).width + 10; roundedRectPath(ctx, lx - 4, ly - 9, tw, 18, 4); ctx.fillStyle = "rgba(3,18,23,.86)"; ctx.fill(); ctx.fillStyle = "#effff7"; ctx.fillText(label, lx + 1, ly + .5); }
     }); ctx.restore();
   }
   function drawUser(ctx,p) { ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,10,0,Math.PI*2);ctx.fillStyle="#65cfe0";ctx.fill();ctx.strokeStyle="#e9ffff";ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(p.x,p.y,18,0,Math.PI*2);ctx.strokeStyle="rgba(101,207,224,.45)";ctx.lineWidth=2;ctx.stroke();ctx.restore(); }
   function drawJournalPoints(ctx,w,h,bounds) { const entries=journal.filter((entry)=>entry.lake===selectedLake); if(!entries.length)return; ctx.save(); entries.forEach((entry)=>{const p=projectPoint(entry.lat,entry.lon,w,h,bounds,34);ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle=entry.type==="catch"?"#f17973":"#65cfe0";ctx.fill();ctx.strokeStyle="#07181d";ctx.lineWidth=2;ctx.stroke();}); ctx.restore(); }
-  function estimateDepth(lat,lon) { const c=lake().focus || lake().center; const dx=(lon-c[1])*111320*Math.cos(c[0]*Math.PI/180),dy=(lat-c[0])*111320; const d=Math.sqrt(dx*dx+dy*dy); const max=lake().maxDepth; return clamp(max*(.18+.82*(1-Math.min(1,d/1200))), .7, max); }
+  function estimateDepth(lat,lon) { if (!lake().contourLevels.length || !Number.isFinite(lake().maxDepth) || !pointInWater([lat,lon])) return null; const c=lake().focus || lake().center; const dx=(lon-c[1])*111320*Math.cos(c[0]*Math.PI/180),dy=(lat-c[0])*111320; const d=Math.sqrt(dx*dx+dy*dy); const max=lake().maxDepth; return clamp(max*(.18+.82*(1-Math.min(1,d/1200))), .7, max); }
   function pointerDistance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
   function pointerCenter(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
   function mapPointerDown(event) {
@@ -683,16 +766,27 @@
   }
   function handleMapTap(event) {
     const rect = event.currentTarget.getBoundingClientRect(); const bounds = mapBounds(); const x = event.clientX - rect.left, y = event.clientY - rect.top; const p = unprojectPoint(x, y, rect.width, rect.height, bounds, 34); const hotspot = nearestHotspot(p.lat, p.lon, rect.width, rect.height, bounds);
-    if (hotspot) showMapToast(hotspot.name + " · " + hotspot.depth + " · " + hotspot.species + " · шанс " + scoreAt(new Date(), settings.fish, hotspot)); else if (pointInPolygon([p.lat, p.lon], lake().geometry)) openPointModal(p); else showMapToast("Точка вне контура воды — приблизьте карту к берегу");
+    if (hotspot) showMapToast(hotspot.name + " · " + hotspot.depth + " · " + hotspot.species + " · поисковая гипотеза"); else if (pointInWater([p.lat, p.lon])) openPointModal(p); else showMapToast("Точка вне контура воды — приблизьте карту к берегу");
   }
   function unprojectPoint(x,y,w,h,bounds,pad=24) { let screenY = y; if (viewMode === "3d") screenY = terrainInverseY(screenY, h); const cx=w/2,cy=h/2; const rawX=(x-cx-mapState.panX)/mapState.scale+cx; const rawY=(screenY-cy-mapState.panY)/mapState.scale+cy; return { lon: bounds.minLon + clamp((rawX-pad)/(w-pad*2),0,1)*(bounds.maxLon-bounds.minLon), lat: bounds.minLat + clamp((h-pad-rawY)/(h-pad*2),0,1)*(bounds.maxLat-bounds.minLat) }; }
   function pointInPolygon(point, polygon) { const lat=point[0],lon=point[1]; let inside=false; for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){const yi=polygon[i][0],xi=polygon[i][1],yj=polygon[j][0],xj=polygon[j][1]; const intersect=((xi>lon)!=(xj>lon)) && (lat < (yj-yi)*(lon-xi)/(xj-xi || 1e-12)+yi); if(intersect) inside=!inside;} return inside; }
-  function nearestHotspot(lat,lon,w,h,bounds) { let best=null,bestPx=Infinity; lake().hotspots.forEach((spot)=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34); const q=projectPoint(lat,lon,w,h,bounds,34); const d=Math.hypot(p.x-q.x,p.y-q.y); if(d<bestPx){bestPx=d;best=spot;}}); return bestPx<Math.max(24,w*.07) ? best : null; }
+  function pointInWater(point) { return pointInPolygon(point,lake().geometry) && !(lake().holes || []).some(ring => pointInPolygon(point,ring)); }
+  function nearestHotspot(lat,lon,w,h,bounds) { let best=null,bestPx=Infinity; rankedHotspots().forEach(({spot})=>{const p=projectPoint(spot.lat,spot.lon,w,h,bounds,34); const q=projectPoint(lat,lon,w,h,bounds,34); const d=Math.hypot(p.x-q.x,p.y-q.y); if(d<bestPx){bestPx=d;best=spot;}}); return bestPx<Math.max(24,w*.07) ? best : null; }
   let mapToastTimer=null;
   function showMapToast(message) { const el=$("mapToast"); el.textContent=message; el.hidden=false; clearTimeout(mapToastTimer); mapToastTimer=setTimeout(()=>{el.hidden=true;},3600); }
   function locateUser() { if(!navigator.geolocation){showToast("Геолокация не поддерживается");return;} showToast("Запрашиваю местоположение…",1800);navigator.geolocation.getCurrentPosition((pos)=>{mapState.user={lat:pos.coords.latitude,lon:pos.coords.longitude}; if (viewMode === "hybrid" && leafletMap) leafletMap.setView([pos.coords.latitude, pos.coords.longitude], Math.max(leafletMap.getZoom(), 14), { animate: true }); else drawMap();showToast("Синяя точка — ваше местоположение",2200);},()=>showToast("Разрешите геолокацию в настройках Safari"),{enableHighAccuracy:true,timeout:8000}); }
 
-  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260901-hybrid-calm-4", { updateViaCache: "none" }).catch(()=>{});} }
-  function boot() { setupNavigation(); $("fishSelect").value=settings.fish; navigate(location.hash.slice(1)||"map",false); setConnection(isOnline()?"online":"offline",isOnline()?"онлайн":"локально"); renderSources(); renderAll(); fetchWeather(false); registerServiceWorker(); }
+  function registerServiceWorker() { if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js?v=20260914-shore-1", { updateViaCache: "none" }).catch(()=>{});} }
+  function boot() {
+    if (settings.fish !== "universal" && !lake().fishKinds.includes(settings.fish)) settings.fish = "universal";
+    setupNavigation(); restoreWeatherCache();
+    $("tripJump").addEventListener("click", () => $("expeditionSection").scrollIntoView({behavior:"smooth"}));
+    navigate(location.hash.slice(1)||"map",false);
+    setConnection(isOnline()?"online":"offline",isOnline()?"онлайн":"локально");
+    setMode(viewMode); renderAll(); fetchWeather(false); registerServiceWorker();
+    setInterval(() => { if (!document.hidden) fetchWeather(false); }, 30*60000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderAll(); if (Date.now()-Number(weatherCache[selectedLake]?.at||0)>15*60000) fetchWeather(false); } });
+  }
+
   document.addEventListener("DOMContentLoaded", boot);
 })();
